@@ -433,7 +433,11 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                                      ;; Top-level heading: use file tags.
                                      org-file-tags)))
                                'org-ql-nil))
-           (all-tags (list inherited-tags local-tags)))
+           all-tags)
+      (when org-group-tags
+        (setq local-tags (org-ql--expand-tag-groups local-tags)
+              inherited-tags (org-ql--expand-tag-groups inherited-tags)))
+      (setq all-tags (list inherited-tags local-tags))
       ;; Check caches again, because they may have been set now.
       ;; TODO: Is there a clever way we could avoid doing this, or is it inherently necessary?
       (setf buffer-cache (gethash (current-buffer) org-ql-tags-cache)
@@ -447,6 +451,29 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                  (cons (buffer-modified-tick) tags-cache)
                  org-ql-tags-cache))
       (puthash position all-tags tags-cache))))
+
+(defun org-ql--expand-tag-groups (tags &optional exclude-groups)
+  (if (eq tags 'org-ql-nil)
+      'org-ql-nil
+    (let ((exclude-groups (append tags exclude-groups))
+          result)
+      (let (group-tags)
+        (dolist (tag tags)
+          (dolist (groups org-tag-groups-alist)
+            (when (and (not (cl-member (car groups) exclude-groups
+                                       :test 'string=))
+                       (cl-some (lambda (x)
+                                  (if (string-match-p "^[{].+[}]$" x)
+                                      (string-match-p
+                                       (concat "^" (substring x 1 -1) "$")
+                                       tag)
+                                    (string= x tag)))
+                                (cdr groups)))
+              (push (car groups) group-tags))))
+        (if group-tags
+            (append tags
+                    (org-ql--expand-tag-groups group-tags exclude-groups))
+          tags)))))
 
 (defun org-ql--outline-path ()
   "Return outline path for heading at point."
