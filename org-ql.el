@@ -435,8 +435,10 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                                'org-ql-nil))
            all-tags)
       (when org-group-tags
-        (setq local-tags (org-ql--expand-tag-groups local-tags)
-              inherited-tags (org-ql--expand-tag-groups inherited-tags)))
+        (unless (eq local-tags 'org-ql-nil)
+          (setq local-tags (org-ql--expand-tag-hierarchy local-tags)))
+        (unless (eq inherited-tags 'org-ql-nil)
+          (setq inherited-tags (org-ql--expand-tag-hierarchy inherited-tags))))
       (setq all-tags (list inherited-tags local-tags))
       ;; Check caches again, because they may have been set now.
       ;; TODO: Is there a clever way we could avoid doing this, or is it inherently necessary?
@@ -452,28 +454,40 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                  org-ql-tags-cache))
       (puthash position all-tags tags-cache))))
 
-(defun org-ql--expand-tag-groups (tags &optional exclude-groups)
-  (if (eq tags 'org-ql-nil)
-      'org-ql-nil
-    (let ((exclude-groups (append tags exclude-groups))
-          result)
-      (let (group-tags)
-        (dolist (tag tags)
-          (dolist (groups org-tag-groups-alist)
-            (when (and (not (cl-member (car groups) exclude-groups
-                                       :test 'string=))
-                       (cl-some (lambda (x)
-                                  (if (string-match-p "^[{].+[}]$" x)
-                                      (string-match-p
-                                       (concat "^" (substring x 1 -1) "$")
-                                       tag)
-                                    (string= x tag)))
-                                (cdr groups)))
-              (push (car groups) group-tags))))
-        (if group-tags
-            (append tags
-                    (org-ql--expand-tag-groups group-tags exclude-groups))
-          tags)))))
+(defun org-ql--expand-tag-hierarchy (tags &optional excluded)
+  "Return TAGS along with their associated group tags.
+This function recursively searches for groups that each given tag belongs to,
+directly or indirectly, and includes the corresponding group tags to the result.
+
+TAGS should be a list of tags (i.e., strings).
+If non-nil, EXCLUDED should be a list of group tags that will not be
+automatically added to the results unless they are already in TAGS."
+  (let ((groups (org-tag-alist-to-groups org-current-tag-alist))
+        (excluded (append tags excluded))
+        result)
+    (let (group-tags)
+      (dolist (tag tags)
+        (pcase-dolist (`(,group-tag . ,group-members) groups)
+          (when (and (not (member group-tag excluded))
+                     ;; Check if one of the members in the group matches tag.
+                     ;; Notice that each member may be a plain string or
+                     ;; a regexp pattern (enclosed between curly brackets).
+                     (--some (if (string-match-p "^[{].+[}]$" it)
+                                 ;; If pattern (it) is a regexp, remove the brackets and
+                                 ;; make sure that it either matches the whole tag or not.
+                                 (string-match-p (concat "^" (substring it 1 -1) "$") tag)
+                               ;; Check if member (it) is identical to tag.
+                               (string= it tag))
+                             group-members))
+            (push group-tag group-tags))))
+      ;; If group tags not already included have been found,
+      ;; then recursively expand them as well.
+      ;; Notice that by passing (group-tags excluded) to the next call
+      ;; instead of ((append tags group-tags)) ensures that we do not
+      ;; unnecessarily loop over the elements of TAGS more than once.
+      (if group-tags
+          (append tags (org-ql--expand-tag-hierarchy group-tags excluded))
+        tags))))
 
 (defun org-ql--outline-path ()
   "Return outline path for heading at point."
