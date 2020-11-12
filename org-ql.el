@@ -464,30 +464,29 @@ If non-nil, EXCLUDED should be a list of group tags that will not be
 automatically added to the results unless they are already in TAGS."
   (let ((groups (org-tag-alist-to-groups org-current-tag-alist))
         (excluded (append tags excluded))
-        result)
-    (let (group-tags)
-      (dolist (tag tags)
-        (pcase-dolist (`(,group-tag . ,group-members) groups)
-          (when (and (not (member group-tag excluded))
-                     ;; Check if one of the members in the group matches tag.
-                     ;; Notice that each member may be a plain string or
-                     ;; a regexp pattern (enclosed between curly brackets).
-                     (--some (if (string-match-p "^[{].+[}]$" it)
-                                 ;; If pattern (it) is a regexp, remove the brackets and
-                                 ;; make sure that it either matches the whole tag or not.
-                                 (string-match-p (concat "^" (substring it 1 -1) "$") tag)
-                               ;; Check if member (it) is identical to tag.
-                               (string= it tag))
-                             group-members))
-            (push group-tag group-tags))))
-      ;; If group tags not already included have been found,
-      ;; then recursively expand them as well.
-      ;; Notice that by passing (group-tags excluded) to the next call
-      ;; instead of ((append tags group-tags)) ensures that we do not
-      ;; unnecessarily loop over the elements of TAGS more than once.
-      (if group-tags
-          (append tags (org-ql--expand-tag-hierarchy group-tags excluded))
-        tags))))
+        group-tags)
+    (dolist (tag tags)
+      (pcase-dolist (`(,group-tag . ,group-members) groups)
+        (when (and (not (member group-tag excluded))
+                   ;; Check if one of the members in the group matches tag.
+                   ;; Notice that each member may be a plain string or
+                   ;; a regexp pattern (enclosed between curly brackets).
+                   (--some (if (string-match-p "^[{].+[}]$" it)
+                               ;; If pattern (it) is a regexp, remove the brackets and
+                               ;; make sure that it either matches the whole tag or not.
+                               (string-match-p (concat "^" (substring it 1 -1) "$") tag)
+                             ;; Check if member (it) is identical to tag.
+                             (string= it tag))
+                           group-members))
+          (push group-tag group-tags))))
+    ;; If group tags not already included have been found,
+    ;; then recursively expand them as well.
+    ;; Notice that by passing (group-tags excluded) to the next call
+    ;; instead of ((append tags group-tags) excluded) ensures that
+    ;; we do not unnecessarily loop over the elements of TAGS more than once.
+    (if group-tags
+        (append tags (org-ql--expand-tag-hierarchy group-tags excluded))
+      tags)))
 
 (defun org-ql--outline-path ()
   "Return outline path for heading at point."
