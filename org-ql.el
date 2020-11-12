@@ -434,11 +434,16 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                                      org-file-tags)))
                                'org-ql-nil))
            all-tags)
-      (when org-group-tags
-        (unless (eq local-tags 'org-ql-nil)
-          (setq local-tags (org-ql--expand-tag-hierarchy local-tags)))
-        (unless (eq inherited-tags 'org-ql-nil)
-          (setq inherited-tags (org-ql--expand-tag-hierarchy inherited-tags))))
+      (let ((tag-groups (and org-group-tags
+                             org-current-tag-alist
+                             (org-tag-alist-to-groups org-current-tag-alist))))
+        (when tag-groups
+          (unless (eq local-tags 'org-ql-nil)
+            (setq local-tags
+                  (org-ql--expand-tag-hierarchy local-tags tag-groups)))
+          (unless (eq inherited-tags 'org-ql-nil)
+            (setq inherited-tags
+                  (org-ql--expand-tag-hierarchy inherited-tags tag-groups)))))
       (setq all-tags (list inherited-tags local-tags))
       ;; Check caches again, because they may have been set now.
       ;; TODO: Is there a clever way we could avoid doing this, or is it inherently necessary?
@@ -454,38 +459,38 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
                  org-ql-tags-cache))
       (puthash position all-tags tags-cache))))
 
-(defun org-ql--expand-tag-hierarchy (tags &optional excluded)
+(defun org-ql--expand-tag-hierarchy (tags &optional groups)
   "Return TAGS along with their associated group tags.
-This function recursively searches for groups that each given tag belongs to,
-directly or indirectly, and includes the corresponding group tags to the result.
+This function recursively searches for groups in GROUPS that
+each tag belongs to and includes the corresponding group tags to the result.
 
 TAGS should be a list of tags (i.e., strings).
-If non-nil, EXCLUDED should be a list of group tags that will not be
-automatically added to the results unless they are already in TAGS."
-  (let ((groups (org-tag-alist-to-groups org-current-tag-alist))
-        (excluded (append tags excluded))
-        group-tags)
+If GROUPS is non-nil, then it must be a list of tag group definitions of
+the form (tag member1 member2 ...).  Otherwise, it defaults to the buffer's
+current tag hierarchy."
+  (let ((groups (or groups (org-tag-alist-to-groups org-current-tag-alist)))
+        matching-group-tags)
+    ;; Remove groups with tags already in the results.
+    (mapc (lambda (tag) (setq groups (assoc-delete-all tag groups))) tags)
+    ;; Iterate over the tags and check if they belong to any of the groups.
     (dolist (tag tags)
       (pcase-dolist (`(,group-tag . ,group-members) groups)
-        (when (and (not (member group-tag excluded))
-                   ;; Check if one of the members in the group matches tag.
-                   ;; Notice that each member may be a plain string or
-                   ;; a regexp pattern (enclosed between curly brackets).
-                   (--some (if (string-match-p "^[{].+[}]$" it)
-                               ;; If pattern (it) is a regexp, remove the brackets and
-                               ;; make sure that it either matches the whole tag or not.
-                               (string-match-p (concat "^" (substring it 1 -1) "$") tag)
-                             ;; Check if member (it) is identical to tag.
-                             (string= it tag))
-                           group-members))
-          (push group-tag group-tags))))
-    ;; If group tags not already included have been found,
-    ;; then recursively expand them as well.
-    ;; Notice that by passing (group-tags excluded) to the next call
-    ;; instead of ((append tags group-tags) excluded) ensures that
-    ;; we do not unnecessarily loop over the elements of TAGS more than once.
-    (if group-tags
-        (append tags (org-ql--expand-tag-hierarchy group-tags excluded))
+        ;; Check if one of the members in the group matches tag.
+        ;; Notice that each member may be a plain string or
+        ;; a regexp pattern (enclosed between curly brackets).
+        (when (--some (if (string-match-p "^[{].+[}]$" it)
+                          ;; If pattern (it) is a regexp, remove the brackets and
+                          ;; make sure that it either matches the whole tag or not.
+                          (string-match-p (concat "^" (substring it 1 -1) "$") tag)
+                        ;; Check if member (it) is identical to tag.
+                        (string= it tag))
+                      group-members)
+          (push group-tag matching-group-tags))))
+    ;; If new tags have been found, then recursively expand them as well.
+    ;; Notice that by expanding the new tags separately and
+    ;; merging the results here reduces the number of unnecessary checks.
+    (if matching-group-tags
+        (append tags (org-ql--expand-tag-hierarchy matching-group-tags groups))
       tags)))
 
 (defun org-ql--outline-path ()
