@@ -576,44 +576,6 @@ readily computed group tags."
                 exclude (-uniq (append cached-matches exclude))))))
     result))
 
-;; (defun org-ql--expand-tag-hierarchy (tags &optional groups cache)
-;;   "Return TAGS along with their associated group tags.
-;; This function recursively searches for groups in GROUPS that
-;; each tag belongs to and includes the corresponding group tags to the result.
-
-;; TAGS should be a list of tags (i.e., strings).
-;; If GROUPS is non-nil, then it must be a list of tag group definitions of
-;; the form (tag member1 member2 ...).  Otherwise, it defaults to the buffer's
-;; current tag hierarchy."
-;;   (let ((groups (or groups (org-tag-alist-to-groups org-current-tag-alist)))
-;;         matching-group-tags)
-;;     ;; Iterate over the tags and check if they belong to any of the groups.
-;;     (dolist (tag tags)
-;;       ;; Check if the groups this tag belongs to have already been cached.
-;;       ;; If so, add it to the results. Otherwise, compute and cache them.
-;;       (let ((cached-matches (gethash tag cache 'org-ql-nil)))
-;;         (if (eq cached-matches 'org-ql-nil)
-;;             (pcase-dolist (`(,group-tag . ,group-members) groups)
-;;               ;; Check if one of the members in the group matches tag.
-;;               ;; Notice that each member may be a plain string or
-;;               ;; a regexp pattern (enclosed between curly brackets).
-;;               (when (--some (if (string-match-p "^[{].+[}]$" it)
-;;                                 ;; If pattern (it) is a regexp, remove the brackets and
-;;                                 ;; make sure that it either matches the whole tag or not.
-;;                                 (string-match-p (concat "^" (substring it 1 -1) "$") tag)
-;;                               ;; Check if member (it) is identical to tag.
-;;                               (string= it tag))
-;;                             group-members)
-;;                 (push group-tag matching-group-tags))))
-;;         )
-;;       )
-;;     ;; If new tags have been found, then recursively expand them as well.
-;;     ;; Notice that by expanding the new tags separately and
-;;     ;; merging the results here reduces the number of unnecessary checks.
-;;     (if matching-group-tags
-;;         (append tags (org-ql--expand-tag-hierarchy matching-group-tags groups))
-;;       tags)))
-
 (defun org-ql--outline-path ()
   "Return outline path for heading at point."
   (save-excursion
