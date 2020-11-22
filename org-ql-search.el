@@ -31,6 +31,7 @@
 
 (require 'dash)
 (require 'f)
+(require 'map)
 (require 'org-super-agenda)
 (require 's)
 
@@ -118,20 +119,20 @@ Interactively, may also be:
 - `all': search all Org buffers
 - `agenda': search buffers returned by the function `org-agenda-files'
 - `directory': search Org files in `org-directory'
-- An expression which evaluates to a list of files/buffers
 - A space-separated list of file or buffer names
 
-QUERY: An `org-ql' query in either sexp or \"plain string\"
-form (see documentation).
+QUERY: An `org-ql' query in either sexp or non-sexp form (see
+Info node `(org-ql)Queries').
 
 SUPER-GROUPS: An `org-super-agenda' group set.  See variable
-`org-super-agenda-groups'.
+`org-super-agenda-groups' and Info node `(org-super-agenda)Group
+selectors'.
 
 NARROW: When non-nil, don't widen buffers before
 searching. Interactively, with prefix, leave narrowed.
 
 SORT: One or a list of `org-ql' sorting functions, like `date' or
-`priority'.
+`priority' (see Info node `(org-ql)Listing / acting-on results').
 
 TITLE: An optional string displayed in the header.
 
@@ -196,15 +197,14 @@ If `org-ql-block-header' is non-nil, it is used as the header
 string for the block, otherwise a the header is formed
 automatically from the query."
   (let (narrow-p old-beg old-end)
-    (when-let* ((from (pcase org-agenda-overriding-restriction
+    (when-let* ((from (pcase org-agenda-restrict
                         ('nil (org-agenda-files nil 'ifmode))
-                        ('file (get 'org-agenda-files 'org-restrict))
-                        ('subtree (prog1 org-agenda-restrict
-                                    (with-current-buffer org-agenda-restrict
-                                      ;; Narrow the buffer; remember to widen it later.
-                                      (setf old-beg (point-min) old-end (point-max)
-                                            narrow-p t)
-                                      (narrow-to-region org-agenda-restrict-begin org-agenda-restrict-end))))))
+                        (_ (prog1 org-agenda-restrict
+                             (with-current-buffer org-agenda-restrict
+			       ;; Narrow the buffer; remember to widen it later.
+			       (setf old-beg (point-min) old-end (point-max)
+                                     narrow-p t)
+			       (narrow-to-region org-agenda-restrict-begin org-agenda-restrict-end))))))
                 (items (org-ql-select from query
                          :action 'element-with-markers
                          :narrow narrow-p)))
@@ -232,11 +232,113 @@ automatically from the query."
 ;;;###autoload
 (defalias 'org-ql-block 'org-ql-search-block)
 
+;;;; Dynamic blocks
+
+;; This section implements support for Org dynamic blocks.  See Info node `(org)Dynamic blocks'.
+
+(require 'org-table)
+
+(cl-defun org-dblock-write:org-ql (params)
+  "Insert content for org-ql dynamic block at point according to PARAMS.
+Valid parameters include:
+
+  :query    An Org QL query expression in either sexp or string
+            form.
+
+  :columns  A list of columns, including `heading', `todo',
+            `property', `priority', `deadline', `scheduled'.
+            Each column may also be specified as a list with the
+            second element being a header string.  For example,
+            to abbreviate the priority column: (priority \"P\").
+            For certain columns, like `property', arguments may
+            be passed by specifying the column type itself as a
+            list.  For example, to display a column showing the
+            values of a property named \"milestone\", with the
+            header being abbreviated to \"M\":
+
+              ((property \"milestone\") \"M\").
+
+  :sort     One or a list of Org QL sorting methods
+            (see `org-ql-select').
+
+  :take     Optionally take a number of results from the front (a
+            positive number) or the end (a negative number) of
+            the results.
+
+  :ts-format  Optional format string used to format
+              timestamp-based columns.
+
+For example, an org-ql dynamic block header could look like:
+
+  #+BEGIN: org-ql :query (todo \"UNDERWAY\") :columns (priority todo heading) :sort (priority date) :ts-format \"%Y-%m-%d %H:%M\""
+  (-let* (((&plist :query :columns :sort :ts-format :take) params)
+          (query (cl-etypecase query
+                   (string (org-ql--plain-query query))
+                   (list  ;; SAFETY: Query is in sexp form: ask for confirmation, because it could contain arbitrary code.
+                    (org-ql--ask-unsafe-query query)
+                    query)))
+          (columns (or columns '(heading todo (priority "P"))))
+          ;; MAYBE: Custom column functions.
+          (format-fns
+           ;; NOTE: Backquoting this alist prevents the lambdas from seeing
+           ;; the variable `ts-format', so we use `list' and `cons'.
+           (list (cons 'todo (lambda (element)
+                               (org-element-property :todo-keyword element)))
+                 (cons 'heading (lambda (element)
+                                  (org-make-link-string (org-element-property :raw-value element)
+                                                        (org-link-display-format
+                                                         (org-element-property :raw-value element)))))
+                 (cons 'priority (lambda (element)
+                                   (--when-let (org-element-property :priority element)
+                                     (char-to-string it))))
+                 (cons 'deadline (lambda (element)
+                                   (--when-let (org-element-property :deadline element)
+                                     (ts-format ts-format (ts-parse-org-element it)))))
+                 (cons 'scheduled (lambda (element)
+                                    (--when-let (org-element-property :scheduled element)
+                                      (ts-format ts-format (ts-parse-org-element it)))))
+                 (cons 'property (lambda (element property)
+                                   (org-element-property (intern (concat ":" (upcase property))) element)))))
+          (elements (org-ql-query :from (current-buffer)
+                                  :where query
+                                  :select '(org-element-headline-parser (line-end-position))
+                                  :order-by sort)))
+    (when take
+      (setf elements (cl-etypecase take
+                       ((and integer (satisfies cl-minusp)) (-take-last (abs take) elements))
+                       (integer (-take take elements)))))
+    (cl-labels ((format-element
+                 (element) (string-join (cl-loop for column in columns
+                                                 collect (or (pcase-exhaustive column
+                                                               ((pred symbolp)
+                                                                (funcall (alist-get column format-fns) element))
+                                                               (`((,column . ,args) ,_header)
+                                                                (apply (alist-get column format-fns) element args))
+                                                               (`(,column ,_header)
+                                                                (funcall (alist-get column format-fns) element)))
+                                                             ""))
+                                        " | ")))
+      ;; Table header
+      (insert "| " (string-join (--map (pcase it
+                                         ((pred symbolp) (capitalize (symbol-name it)))
+                                         (`(,_ ,name) name))
+                                       columns)
+                                " | ")
+              " |" "\n")
+      (insert "|- \n")  ; Separator hline
+      (dolist (element elements)
+        (insert "| " (format-element element) " |" "\n"))
+      (delete-char -1)
+      (org-table-align))))
+
 ;;;; Functions
 
-(cl-defun org-ql-search-directories-files (&key (directories (list org-directory))
-                                                (recurse org-ql-search-directories-files-recursive)
-                                                (regexp org-ql-search-directories-files-regexp))
+(cl-defun org-ql-search-directories-files
+    (&key (directories (if (file-exists-p org-directory)
+                           (list org-directory)
+                         (user-error "Org-ql-search-directories-files: No DIRECTORIES given, and `org-directory' doesn't exist")))
+          (recurse org-ql-search-directories-files-recursive)
+          (regexp org-ql-search-directories-files-regexp))
   "Return list of matching files in DIRECTORIES, a list of directory paths.
 When RECURSE is non-nil, recurse into subdirectories.  When
 REGEXP is non-nil, only return files that match REGEXP."

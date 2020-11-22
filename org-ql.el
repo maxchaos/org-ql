@@ -137,6 +137,24 @@ This list should not contain any duplicates."))
   ;; TODO: Add info manual link.
   :link '(url-link "https://github.com/alphapapa/org-ql"))
 
+(defcustom org-ql-ask-unsafe-queries t
+  "Ask before running a query that could run arbitrary code.
+Org QL queries in sexp form can contain arbitrary expressions.
+When opening an \"org-ql-search:\" link or updating a dynamic
+block that contains a query in sexp form, and this option is
+non-nil, the user will be prompted for confirmation before
+opening the link.
+
+This variable may be set file-locally to disable this warning in
+files that the user assumes are safe (e.g. of known provenance).
+Users who are entirely unconcerned about this issue may disable
+the option globally (at their own risk, however minimal it
+probably is).
+
+See Info node `(org-ql)Queries'."
+  :type 'boolean
+  :risky t)
+
 ;;;; Macros
 
 (cl-defmacro org-ql--defpred (name args docstring &rest body)
@@ -159,7 +177,11 @@ match."
          (fn-name (intern (concat "org-ql--predicate-" (symbol-name name))))
          (pred-name (intern (symbol-name name))))
     `(progn
-       (push (list :name ',pred-name :aliases ',aliases :fn ',fn-name :docstring ,docstring :args ',args) org-ql-predicates)
+       (cl-eval-when (compile load eval)
+	 ;; When compiling, the predicate must be added to `org-ql-predicates' before `org-ql--def-plain-query-fn'
+	 ;; is called to define `org-ql--plain-query'.  Otherwise, `org-ql--plain-query' seems to work properly
+	 ;; when interpreted but not always when the file is byte-compiled.
+	 (push (list :name ',pred-name :aliases ',aliases :fn ',fn-name :docstring ,docstring :args ',args) org-ql-predicates))
        (cl-defun ,fn-name ,args ,docstring ,@body))))
 
 ;; TODO: Mark as obsolete/deprecated.
@@ -221,6 +243,8 @@ returns nil or non-nil."
                           (list buffers-or-files)
                           (otherwise (list buffers-or-files)))
                         (--map (cl-etypecase it
+                                 ;; NOTE: This etypecase is essential to opening links safely,
+                                 ;; as it rejects, e.g. lambdas in the buffers-files argument.
                                  (buffer it)
                                  (string (or (find-buffer-visiting it)
                                              (when (file-readable-p it)
@@ -393,6 +417,7 @@ If NARROW is non-nil, buffer will not be widened."
 ;;;;; Helpers
 
 (defun org-ql--tags-at (position)
+  ;; FIXME: This function actually assumes that point is already at POSITION.
   "Return tags for POSITION in current buffer.
 Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
   ;; I'd like to use `-if-let*', but it doesn't leave non-nil variables
@@ -404,6 +429,9 @@ Returns cons (INHERITED-TAGS . LOCAL-TAGS)."
             (buffer-unmodified-p (eq (buffer-modified-tick) modified-tick))
             (cached-result (gethash position tags-cache)))
       ;; Found in cache: return them.
+      ;; FIXME: Isn't `cached-result' a list of (INHERITED . LOCAL)?  It
+      ;; will never be just `org-ql-nil', but the CAR and CDR may be, so
+      ;; they need to each be checked and replaced with nil if necessary.
       (pcase cached-result
         ('org-ql-nil nil)
         (_ cached-result))
@@ -566,6 +594,19 @@ from within ELEMENT's buffer."
     (setf (cadr element) properties)
     element))
 
+(defun org-ql--ask-unsafe-query (query)
+  "Signal an error if user rejects running QUERY.
+If `org-ql-view-ask-unsafe-links' is nil, does nothing and
+returns nil."
+  (when org-ql-ask-unsafe-queries
+    (let ((query-string (propertize (cl-etypecase query
+                                      (list (prin1-to-string query))
+                                      (string query))
+                                    'face 'font-lock-warning-face)))
+      (unless (yes-or-no-p (concat "Query is in sexp form and could contain arbitrary code: "
+                                   query-string " Execute it? "))
+        (user-error "Query aborted by user")))))
+
 ;;;;; Query processing
 
 ;; Processing, compiling, etc. for queries.
@@ -713,6 +754,7 @@ Replaces bare strings with (regexp) selectors, and appropriate
                      ;; Inherited and local predicate aliases.
                      (`(,(or 'tags-i 'itags 'inherited-tags) . ,tags) `(tags-inherited ,@tags))
                      (`(,(or 'tags-l 'ltags 'local-tags) . ,tags) `(tags-local ,@tags))
+                     (`(,(or 'tags*) . ,regexps) `(tags-regexp ,@regexps))
 
                      ;; Timestamps
                      (`(,(or 'ts-active 'ts-a) . ,rest) `(ts :type active ,@rest))
@@ -1194,6 +1236,25 @@ If TAGS is nil, return non-nil if heading has any local tags."
         (otherwise (when (tags-p local)
                      (seq-intersection tags local)))))))
 
+(org-ql--defpred (tags-regexp tags*) (&rest regexps)
+  "Return non-nil if current heading has tags matching one or more of REGEXPS.
+Tests both inherited and local tags."
+  (cl-macrolet ((tags-p (tags)
+                        `(and ,tags
+                              (not (eq 'org-ql-nil ,tags)))))
+    (-let* (((inherited local) (org-ql--tags-at (point))))
+      (cl-typecase regexps
+        (null (or (tags-p inherited)
+                  (tags-p local)))
+        (otherwise (or (when (tags-p inherited)
+                         (cl-loop for tag in inherited
+                                  thereis (cl-loop for regexp in regexps
+                                                   thereis (string-match regexp tag))))
+                       (when (tags-p local)
+                         (cl-loop for tag in local
+                                  thereis (cl-loop for regexp in regexps
+                                                   thereis (string-match regexp tag))))))))))
+
 (org-ql--defpred level (level-or-comparator &optional level)
   "Return non-nil if current heading's outline level matches arguments.
 The following forms are accepted:
@@ -1643,7 +1704,7 @@ PREDICATES is a list of one or more sorting methods, including:
                                                                              ;; Put at end of list if not found
                                                                              (1+ (length org-todo-keywords-1)))))))
                                      (-flatten-n 1 (-map #'cdr sorted-groups)))))
-    (cl-loop for pred in (nreverse predicates)
+    (cl-loop for pred in (reverse predicates)
              do (setq items (if (eq pred 'todo)
                                 (sort-by-todo-keyword items)
                               (-sort (sorter pred) items)))
@@ -1709,6 +1770,8 @@ element should be a regexp string."
 ;; This section implements parsing of "plain," non-Lisp queries using the `peg'
 ;; library.  NOTE: This needs to appear after the predicates are defined.
 
+;; TODO: Rename "plain" to "string", or something like that.
+
 (require 'peg)
 
 ;; Fix compiler warnings probably caused by `peg' not using lexical-binding.
@@ -1717,9 +1780,12 @@ element should be a regexp string."
 (defvar peg-stack nil)
 
 (defmacro org-ql--peg-parse-string (rules string &optional noerror)
-  "Parse STRING according to RULES.
-If NOERROR is non-nil, push nil resp. t if the parse failed
-resp. succeded instead of signaling an error."
+  "Parse STRING according to RULES."
+  ;; This sentence was in the docstring but Checkdoc is complaining,
+  ;; so moving it to a comment: "If NOERROR is non-nil, push nil
+  ;; resp. t if the parse failed resp. succeded instead of signaling
+  ;; an error."
+
   ;; Unfortunately, this macro was moved to peg-tests.el, so we copy it here.
   `(with-temp-buffer
      (insert ,string)
@@ -1786,6 +1852,79 @@ Multiple predicates are combined with BOOLEAN."
                (cadr query)))))))
 
   (org-ql--def-plain-query-fn))
+
+;; And now we go the other direction...
+
+(defun org-ql--query-sexp-to-string (query)
+  "Return a string query for sexp QUERY.
+If QUERY can't be converted to a string, return nil."
+  ;; This started out pretty simple...but at least it's not just one long function, right?
+  (cl-labels ((complex-p (query)
+                         (or (contains-p 'or query)
+			     (contains-p 'ancestors query)
+			     (contains-p 'children query)
+			     (contains-p 'descendants query)
+			     (contains-p 'parent query)))
+              (contains-p (symbol list)
+                          (cl-loop for element in list
+                                   thereis (or (eq symbol element)
+                                               (and (listp element)
+                                                    (contains-p symbol element)))))
+              (format-args
+               (args) (let (non-paired paired next-keyword)
+                        (cl-loop for arg in args
+                                 do (cond (next-keyword (push (cons next-keyword arg) paired)
+                                                        (setf next-keyword nil))
+                                          ((keywordp arg) (setf next-keyword (substring (symbol-name arg) 1)))
+                                          (t (push arg non-paired))))
+                        (string-join (append (mapcar #'format-atom non-paired)
+                                             (nreverse (--map (format "%s=%s" (car it) (cdr it))
+                                                              paired)))
+                                     ",")))
+              (format-atom
+               (atom) (cl-typecase atom
+                        (string (if (string-match (rx space) atom)
+                                    (format "%S" atom)
+                                  (format "%s" atom)))
+                        (t (format "%s" atom))))
+              (format-form
+               (form) (pcase form
+                        (`(not . (,rest)) (concat "!" (format-form rest)))
+                        (`(priority . ,_) (format-priority form))
+                        ;; FIXME: Convert (src) queries to non-sexp form...someday...
+                        (`(src . ,_) (user-error "Converting (src ...) queries to non-sexp form is not implemented"))
+                        (_ (pcase-let* ((`(,pred . ,args) form)
+                                        (args-string (pcase args
+                                                       ('() "")
+                                                       ((guard (= 1 (length args))) (format "%s" (car args)))
+                                                       (_ (format-args args)))))
+                             (format "%s:%s" pred args-string)))))
+              (format-and
+               (form) (pcase-let* ((`(and . ,rest) form))
+                        (string-join (mapcar #'format-form rest) " ")))
+              (format-priority
+               (form) (pcase-let* ((`(priority . ,rest) form)
+                                   (args (pcase rest
+                                           (`(,(and comparator (or '< '<= '> '>= '=)) ,letter)
+                                            (priority-letters comparator letter))
+                                           (_ rest))))
+                        (concat "priority:" (string-join args ","))))
+              (priority-letters
+               (comparator letter) (let* ((char (string-to-char (upcase (symbol-name letter))))
+                                          (numeric-priorities '(?A ?B ?C))
+                                          ;; NOTE: The comparator inversion is intentional.
+                                          (others (pcase comparator
+                                                    ('< (--select (> it char) numeric-priorities))
+                                                    ('<= (--select (>= it char) numeric-priorities))
+                                                    ('> (--select (< it char) numeric-priorities))
+                                                    ('>= (--select (<= it char) numeric-priorities))
+                                                    ('= (--select (= it char) numeric-priorities)))))
+                                     (mapcar #'char-to-string others))))
+    ;; FIXME: Error out for ts structs passed to `ts' predicate (very unlikely to be linked to).
+    (unless (complex-p query)
+      (pcase query
+        (`(and . ,_) (format-and query))
+        (_ (format-form query))))))
 
 ;;;; Footer
 

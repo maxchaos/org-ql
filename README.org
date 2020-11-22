@@ -68,6 +68,8 @@ Installing with [[https://framagit.org/steckerhalter/quelpa][Quelpa]] is easy:
   - [[#ancestordescendant-predicates][Ancestor/descendant predicates]]
   - [[#datetime-predicates][Date/time predicates]]
 - [[#functions--macros][Functions / Macros]]
+- [[#dynamic-block][Dynamic block]]
+- [[#links][Links]]
 - [[#tips][Tips]]
 :END:
 
@@ -104,7 +106,6 @@ Read ~QUERY~ and search with ~org-ql~.  Interactively, prompt for these variable
 + ~buffer~: search the current buffer 
 + ~all~: search all Org buffers 
 + ~agenda~: search buffers returned by the function ~org-agenda-files~ 
-+ An expression which evaluates to a list of files/buffers 
 + A space-separated list of file or buffer names
 
 ~GROUPS~: An ~org-super-agenda~ group set.  See variable ~org-super-agenda-groups~.
@@ -164,7 +165,7 @@ Show a sparse tree for ~QUERY~ in ~BUFFER~ and return number of results.  The tr
 - [[#datetime-predicates][Date/time predicates]]
 :END:
 
-An =org-ql= query is a lisp form which may contain arbitrary lisp forms, as well as certain built-in predicates.  It is byte-compiled into a predicate function which is tested with point on each heading in an Org buffer; when it returns non-nil, the heading matches the query.
+An =org-ql= query is a Lisp expression which may contain arbitrary expressions, as well as calling certain built-in predicates.  It is byte-compiled into a predicate function which is tested with point on each heading in an Org buffer; when it returns non-nil, the heading matches the query.  When possible, certain built-in predicates are optimized away to whole-buffer regular expression searches, which are much faster to search for than testing the predicate on each heading.
 
 *Notes:*
 +  Bare strings like ~"string"~ are automatically converted to ~(regexp "string")~ predicates.
@@ -218,6 +219,8 @@ Arguments are listed next to predicate names, where applicable.
      -  Aliases: ~local-tags~, ~tags-l~, ~ltags~.
 +  =tags-all (tags)= :: Return non-nil if current heading includes all of ~TAGS~.  Tests both inherited and local tags.
      -  Aliases: ~tags&~.
++  =tags-regexp (&rest regexps)= :: Return non-nil if current heading has tags matching one or more of ~REGEXPS~.  Tests both inherited and local tags.
+     -  Aliases: ~tags*~.
 +  =todo (&optional keywords)= :: Return non-nil if current heading is a ~TODO~ item.  With ~KEYWORDS~, return non-nil if its keyword is one of ~KEYWORDS~ (a list of strings).  When called without arguments, only matches non-done tasks (i.e. does not match keywords in ~org-done-keywords~).
 
 *** Ancestor/descendant predicates
@@ -295,6 +298,12 @@ However, the ~org-ql-block~ version runs in about 1/5th the time.
 The variable =org-ql-block-header= may be bound to a string to use as the block header, otherwise the header is formed automatically.
 
 *** Listing / acting-on results
+
+**** Caching
+
+Org QL uses a per-buffer cache to speed up subsequent searches.  It's keyed on query expressions, which means that, for the same query in the same buffer, if the buffer has not been modified since the last time the query was run, the cached result will be returned, and the query will not be evaluated in that buffer again.
+
+Therefore, since query expressions are not guaranteed to be evaluated when these functions are called, they should be free of side effects.  Any side effects should be done in the action expression instead.
 
 **** Function: ~org-ql-select~
 
@@ -396,6 +405,51 @@ Examples:
 
 Expands into a call to ~org-ql-select~ with the same arguments.  For convenience, arguments should be unquoted.
 
+** Dynamic block
+
+Org QL provides a dynamic block that lists entries in the current document matching a query.  In the header, these parameters are supported:
+
++  ~:query~: An Org QL query expression in either sexp or non-sexp form.
++  ~:columns~ A list of columns, including ~heading~, ~todo~, ~property~, ~priority~, ~deadline~, ~scheduled~.
+     -  Each column may also be specified as a list with the second element being a header string.  For example, to abbreviate the priority column: ~(priority "P")~.
+     -  For certain columns, like =property=, arguments may be passed by specifying the column type itself as a list.  For example, to display a column showing the values of a ~property~ named ~milestone~, with the header being abbreviated to ~M~: ~((property "milestone") "M")~.
++  ~:sort~ One or a list of Org QL sorting methods (see ~org-ql-select~).
++  ~:take~ Optionally take a number of results from the front (a positive number) or the end (a negative number) of the results.
++  ~:ts-format~ Optional format string used to format timestamp-based columns.
+
+The heading column is formatted as a link to the heading (not shown in the following example).
+
+For example, this dynamic block shows the first seven headings that are to-do items with priority A or B, sorted by deadline then priority, with certain columns (including the value of the =agenda-group= property with a custom header) and timestamp format:
+
+# NOTE: These results are edited manually because the Org links don't display well in the Info manual.
+
+#+BEGIN_SRC org
+  ,#+BEGIN: org-ql :query "todo: priority:A,B" :columns (todo (priority "P") ((property "agenda-group") "Group") deadline heading) :sort (deadline priority) :take 7 :ts-format "%Y-%m-%d %H:%M"
+  | Todo | P | Group | Deadline         | Heading                               |
+  |------+---+-------+------------------+---------------------------------------|
+  | TODO | A |       | 2017-07-07 00:00 | Take over the world                   |
+  | TODO | B |       | 2017-07-10 00:00 | Renew membership in supervillain club |
+  | TODO | A | plans | 2017-07-15 00:00 | Take over the universe                |
+  | TODO | B |       | 2017-07-21 00:00 | Internet                              |
+  | TODO | A | bills | 2017-08-01 00:00 | Spaceship lease                       |
+  | TODO | A |       |                  | Skype with president of Antarctica    |
+  | TODO | B |       |                  | Take over Mars                        |
+  ,#+END:
+#+END_SRC
+
+** Links
+
+Org QL View searches may be accessed by opening ~org-ql-search:~ links in an Org file.
+
+In an Org QL View buffer, the command ~org-store-link~ (i.e. ~C-c l~) stores a link to the current search, and it may be inserted into an Org buffer with the command ~org-insert-link~ (~C-c C-l~).  The stored link records all of the view settings, like title, sorting, and grouping.
+
+Simple links may also be written manually in either sexp or non-sexp form, like:
+
+#+BEGIN_SRC org
+  [[org-ql-search:todo:NEXT priority:A]]
+  [[org-ql-search:(and (todo "NEXT") (priority "A"))]]
+#+END_SRC
+
 ** Tips
 
 +  Org QL View buffers can be bookmarked with Emacs bookmark commands, e.g. =C-x r m=.  This also integrates with [[https://github.com/alphapapa/org-sidebar][org-sidebar]] and [[https://github.com/alphapapa/burly.el][Burly]].
@@ -412,7 +466,10 @@ Expands into a call to ~org-ql-select~ with the same arguments.  For convenience
 *Added*
 +  View dispatcher using =transient.el= (like Magit), bound to =v= in search/view buffers.
 +  Predicate =link=, which matches descriptions and targets in Org links.
++  Predicate ~tags-regexp~ (alias: ~tags*~), which matches regexps against entry tags (e.g, helpful when a tag might end in "s").
 +  Emacs bookmark support: Org QL View buffers can be bookmarked with, e.g. =C-x r m= and shown with, e.g. =C-x r b=.  (This also enables view restoration with [[https://github.com/alphapapa/burly.el][Burly]].)
++  Dynamic block support.
++  Org link support (storing and opening links to Org QL View searches).
 +  Mascot.
 
 *Changed*
@@ -420,6 +477,24 @@ Expands into a call to ~org-ql-select~ with the same arguments.  For convenience
 
 *Internal*
 +  When formatting entries for Org QL View buffers, use internal function for retrieving heading tags.  This improves speed by using our cache, and it removes the need for a compatibility alias for Org versions before 9.3.
+
+*Acknowledgments*
++  [[https://github.com/tpeacock19][tpeacock19]] for extensive help testing new features in this version.
+
+** 0.4.9
+
+*Fixed*
++  Agenda restriction in =org-ql-block=.  (Fixes [[https://github.com/alphapapa/org-ql/issues/84][#84]].  Thanks to [[https://github.com/yantar92][Ihor Radchenko]].)
+
+** 0.4.8
+
+*Fixed*
++  Multiple sorters not preserved when refreshing views.  (Fixes [[https://github.com/alphapapa/org-ql/issues/136][#136]], [[https://github.com/alphapapa/org-ql/pull/137][#137]].  Thanks to [[https://github.com/natrys][Imran Khan]].)
+
+** 0.4.7
+
+*Fixed*
++  Give a useful error if =org-ql-search-directories-files= is called without a directories argument and =org-directory= doesn't exist.  (Fixes [[https://github.com/alphapapa/org-ql/issues/139][#139]].  Thanks to [[https://github.com/matthuszagh][Matt Huszagh]] for reporting.)
 
 ** 0.4.6
 

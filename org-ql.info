@@ -35,6 +35,8 @@ Usage
 * Commands::
 * Queries::
 * Functions / Macros::
+* Dynamic block::
+* Links::
 * Tips::
 
 Commands
@@ -65,6 +67,9 @@ Functions / Macros
 Changelog
 
 * 0.5-pre: 05-pre. 
+* 0.4.9: 049. 
+* 0.4.8: 048. 
+* 0.4.7: 047. 
 * 0.4.6: 046. 
 * 0.4.5: 045. 
 * 0.4.4: 044. 
@@ -154,7 +159,7 @@ File: README.info,  Node: Usage,  Next: Changelog,  Prev: Installation,  Up: Top
 *******
 
    • • 
-        • • • • • • 
+        • • • • • • • • 
    Feedback on these APIs is welcome.  Eventually, after being tested
 and polished, they will be considered stable.
 
@@ -165,6 +170,8 @@ and polished, they will be considered stable.
 * Commands::
 * Queries::
 * Functions / Macros::
+* Dynamic block::
+* Links::
 * Tips::
 
 
@@ -210,7 +217,6 @@ Interactively, may also be:
    • ‘all’: search all Org buffers
    • ‘agenda’: search buffers returned by the function
      ‘org-agenda-files’
-   • An expression which evaluates to a list of files/buffers
    • A space-separated list of file or buffer names
 
    ‘GROUPS’: An ‘org-super-agenda’ group set.  See variable
@@ -312,10 +318,13 @@ File: README.info,  Node: Queries,  Next: Functions / Macros,  Prev: Commands,  
 ===========
 
    • • • • 
-   An org-ql query is a lisp form which may contain arbitrary lisp
-forms, as well as certain built-in predicates.  It is byte-compiled into
-a predicate function which is tested with point on each heading in an
-Org buffer; when it returns non-nil, the heading matches the query.
+   An org-ql query is a Lisp expression which may contain arbitrary
+expressions, as well as calling certain built-in predicates.  It is
+byte-compiled into a predicate function which is tested with point on
+each heading in an Org buffer; when it returns non-nil, the heading
+matches the query.  When possible, certain built-in predicates are
+optimized away to whole-buffer regular expression searches, which are
+much faster to search for than testing the predicate on each heading.
 
    *Notes:*
    • Bare strings like ‘"string"’ are automatically converted to
@@ -452,6 +461,10 @@ Arguments are listed next to predicate names, where applicable.
      Return non-nil if current heading includes all of ‘TAGS’.  Tests
      both inherited and local tags.
         • Aliases: ‘tags&’.
+‘tags-regexp (&rest regexps)’
+     Return non-nil if current heading has tags matching one or more of
+     ‘REGEXPS’.  Tests both inherited and local tags.
+        • Aliases: ‘tags*’.
 ‘todo (&optional keywords)’
      Return non-nil if current heading is a ‘TODO’ item.  With
      ‘KEYWORDS’, return non-nil if its keyword is one of ‘KEYWORDS’ (a
@@ -544,7 +557,7 @@ number of days.  The number can be negative to invert the direction.
           scheduled at any time.
 
 
-File: README.info,  Node: Functions / Macros,  Next: Tips,  Prev: Queries,  Up: Usage
+File: README.info,  Node: Functions / Macros,  Next: Dynamic block,  Prev: Queries,  Up: Usage
 
 4.3 Functions / Macros
 ======================
@@ -597,7 +610,20 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
 4.3.2 Listing / acting-on results
 ---------------------------------
 
-  1. Function: ‘org-ql-select’
+  1. Caching
+
+     Org QL uses a per-buffer cache to speed up subsequent searches.
+     It’s keyed on query expressions, which means that, for the same
+     query in the same buffer, if the buffer has not been modified since
+     the last time the query was run, the cached result will be
+     returned, and the query will not be evaluated in that buffer again.
+
+     Therefore, since query expressions are not guaranteed to be
+     evaluated when these functions are called, they should be free of
+     side effects.  Any side effects should be done in the action
+     expression instead.
+
+  2. Function: ‘org-ql-select’
 
      _Arguments:_ ‘(buffers-or-files query &key action narrow sort)’
 
@@ -657,7 +683,7 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
             '(todo "WAITING"))
           ;; => ((headline (:raw-value "Visit the moon" ...) ...) ...)
 
-  2. Function: ‘org-ql-query’
+  3. Function: ‘org-ql-query’
 
      _Arguments:_ ‘(&key (select 'element-with-markers) from where
      order-by narrow)’
@@ -702,7 +728,7 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
             :where '(todo "WAITING"))
           ;; => ((headline (:raw-value "Visit the moon" ...) ...) ...)
 
-  3. Macro: ‘org-ql’
+  4. Macro: ‘org-ql’
 
      _Arguments:_ ‘(buffers-or-files query &key sort narrow markers
      action)’
@@ -711,9 +737,79 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
      For convenience, arguments should be unquoted.
 
 
-File: README.info,  Node: Tips,  Prev: Functions / Macros,  Up: Usage
+File: README.info,  Node: Dynamic block,  Next: Links,  Prev: Functions / Macros,  Up: Usage
 
-4.4 Tips
+4.4 Dynamic block
+=================
+
+Org QL provides a dynamic block that lists entries in the current
+document matching a query.  In the header, these parameters are
+supported:
+
+   • ‘:query’: An Org QL query expression in either sexp or non-sexp
+     form.
+   • ‘:columns’ A list of columns, including ‘heading’, ‘todo’,
+     ‘property’, ‘priority’, ‘deadline’, ‘scheduled’.
+        • Each column may also be specified as a list with the second
+          element being a header string.  For example, to abbreviate the
+          priority column: ‘(priority "P")’.
+        • For certain columns, like property, arguments may be passed by
+          specifying the column type itself as a list.  For example, to
+          display a column showing the values of a ‘property’ named
+          ‘milestone’, with the header being abbreviated to ‘M’:
+          ‘((property "milestone") "M")’.
+   • ‘:sort’ One or a list of Org QL sorting methods (see
+     ‘org-ql-select’).
+   • ‘:take’ Optionally take a number of results from the front (a
+     positive number) or the end (a negative number) of the results.
+   • ‘:ts-format’ Optional format string used to format timestamp-based
+     columns.
+
+   The heading column is formatted as a link to the heading (not shown
+in the following example).
+
+   For example, this dynamic block shows the first seven headings that
+are to-do items with priority A or B, sorted by deadline then priority,
+with certain columns (including the value of the agenda-group property
+with a custom header) and timestamp format:
+
+     #+BEGIN: org-ql :query "todo: priority:A,B" :columns (todo (priority "P") ((property "agenda-group") "Group") deadline heading) :sort (deadline priority) :take 7 :ts-format "%Y-%m-%d %H:%M"
+     | Todo | P | Group | Deadline         | Heading                               |
+     |------+---+-------+------------------+---------------------------------------|
+     | TODO | A |       | 2017-07-07 00:00 | Take over the world                   |
+     | TODO | B |       | 2017-07-10 00:00 | Renew membership in supervillain club |
+     | TODO | A | plans | 2017-07-15 00:00 | Take over the universe                |
+     | TODO | B |       | 2017-07-21 00:00 | Internet                              |
+     | TODO | A | bills | 2017-08-01 00:00 | Spaceship lease                       |
+     | TODO | A |       |                  | Skype with president of Antarctica    |
+     | TODO | B |       |                  | Take over Mars                        |
+     #+END:
+
+
+File: README.info,  Node: Links,  Next: Tips,  Prev: Dynamic block,  Up: Usage
+
+4.5 Links
+=========
+
+Org QL View searches may be accessed by opening ‘org-ql-search:’ links
+in an Org file.
+
+   In an Org QL View buffer, the command ‘org-store-link’ (i.e.  ‘C-c
+l’) stores a link to the current search, and it may be inserted into an
+Org buffer with the command ‘org-insert-link’ (‘C-c C-l’).  The stored
+link records all of the view settings, like title, sorting, and
+grouping.
+
+   Simple links may also be written manually in either sexp or non-sexp
+form, like:
+
+     [[org-ql-search:todo:NEXT priority:A]]
+     [[org-ql-search:(and (todo "NEXT") (priority "A"))]]
+
+
+File: README.info,  Node: Tips,  Prev: Links,  Up: Usage
+
+4.6 Tips
 ========
 
    • Org QL View buffers can be bookmarked with Emacs bookmark commands,
@@ -736,6 +832,9 @@ releases.
 * Menu:
 
 * 0.5-pre: 05-pre. 
+* 0.4.9: 049. 
+* 0.4.8: 048. 
+* 0.4.7: 047. 
 * 0.4.6: 046. 
 * 0.4.5: 045. 
 * 0.4.4: 044. 
@@ -753,7 +852,7 @@ releases.
 * 0.1: 01. 
 
 
-File: README.info,  Node: 05-pre,  Next: 046,  Up: Changelog
+File: README.info,  Node: 05-pre,  Next: 049,  Up: Changelog
 
 5.1 0.5-pre
 ===========
@@ -763,10 +862,15 @@ File: README.info,  Node: 05-pre,  Next: 046,  Up: Changelog
      search/view buffers.
    • Predicate link, which matches descriptions and targets in Org
      links.
+   • Predicate ‘tags-regexp’ (alias: ‘tags*’), which matches regexps
+     against entry tags (e.g, helpful when a tag might end in "s").
    • Emacs bookmark support: Org QL View buffers can be bookmarked with,
      e.g.  C-x r m and shown with, e.g.  C-x r b.  (This also enables
      view restoration with Burly
      (https://github.com/alphapapa/burly.el).)
+   • Dynamic block support.
+   • Org link support (storing and opening links to Org QL View
+     searches).
    • Mascot.
 
    *Changed*
@@ -778,10 +882,50 @@ File: README.info,  Node: 05-pre,  Next: 046,  Up: Changelog
      our cache, and it removes the need for a compatibility alias for
      Org versions before 9.3.
 
-
-File: README.info,  Node: 046,  Next: 045,  Prev: 05-pre,  Up: Changelog
+   *Acknowledgments*
+   • tpeacock19 (https://github.com/tpeacock19) for extensive help
+     testing new features in this version.
 
-5.2 0.4.6
+
+File: README.info,  Node: 049,  Next: 048,  Prev: 05-pre,  Up: Changelog
+
+5.2 0.4.9
+=========
+
+*Fixed*
+   • Agenda restriction in org-ql-block.  (Fixes #84
+     (https://github.com/alphapapa/org-ql/issues/84).  Thanks to Ihor
+     Radchenko (https://github.com/yantar92).)
+
+
+File: README.info,  Node: 048,  Next: 047,  Prev: 049,  Up: Changelog
+
+5.3 0.4.8
+=========
+
+*Fixed*
+   • Multiple sorters not preserved when refreshing views.  (Fixes #136
+     (https://github.com/alphapapa/org-ql/issues/136), #137
+     (https://github.com/alphapapa/org-ql/pull/137).  Thanks to Imran
+     Khan (https://github.com/natrys).)
+
+
+File: README.info,  Node: 047,  Next: 046,  Prev: 048,  Up: Changelog
+
+5.4 0.4.7
+=========
+
+*Fixed*
+   • Give a useful error if org-ql-search-directories-files is called
+     without a directories argument and org-directory doesn’t exist.
+     (Fixes #139 (https://github.com/alphapapa/org-ql/issues/139).
+     Thanks to Matt Huszagh (https://github.com/matthuszagh) for
+     reporting.)
+
+
+File: README.info,  Node: 046,  Next: 045,  Prev: 047,  Up: Changelog
+
+5.5 0.4.6
 =========
 
 *Fixed*
@@ -794,7 +938,7 @@ File: README.info,  Node: 046,  Next: 045,  Prev: 05-pre,  Up: Changelog
 
 File: README.info,  Node: 045,  Next: 044,  Prev: 046,  Up: Changelog
 
-5.3 0.4.5
+5.6 0.4.5
 =========
 
 *Fixed*
@@ -806,7 +950,7 @@ File: README.info,  Node: 045,  Next: 044,  Prev: 046,  Up: Changelog
 
 File: README.info,  Node: 044,  Next: 043,  Prev: 045,  Up: Changelog
 
-5.4 0.4.4
+5.7 0.4.4
 =========
 
 *Fixed*
@@ -818,7 +962,7 @@ File: README.info,  Node: 044,  Next: 043,  Prev: 045,  Up: Changelog
 
 File: README.info,  Node: 043,  Next: 042,  Prev: 044,  Up: Changelog
 
-5.5 0.4.3
+5.8 0.4.3
 =========
 
 *Fixed*
@@ -828,7 +972,7 @@ File: README.info,  Node: 043,  Next: 042,  Prev: 044,  Up: Changelog
 
 File: README.info,  Node: 042,  Next: 041,  Prev: 043,  Up: Changelog
 
-5.6 0.4.2
+5.9 0.4.2
 =========
 
 *Fixed*
@@ -837,8 +981,8 @@ File: README.info,  Node: 042,  Next: 041,  Prev: 043,  Up: Changelog
 
 File: README.info,  Node: 041,  Next: 04,  Prev: 042,  Up: Changelog
 
-5.7 0.4.1
-=========
+5.10 0.4.1
+==========
 
 *Fixed*
    • level predicate used with arguments in plain queries.  (Thanks to
@@ -847,8 +991,8 @@ File: README.info,  Node: 041,  Next: 04,  Prev: 042,  Up: Changelog
 
 File: README.info,  Node: 04,  Next: 032,  Prev: 041,  Up: Changelog
 
-5.8 0.4
-=======
+5.11 0.4
+========
 
 _Note:_ The next release, 0.5, may include changes which will require
 minor updates to written queries (e.g.  a few predicates may be
@@ -928,8 +1072,8 @@ as they will be pushed to the master branch when ready.
 
 File: README.info,  Node: 032,  Next: 031,  Prev: 04,  Up: Changelog
 
-5.9 0.3.2
-=========
+5.12 0.3.2
+==========
 
 *Fixed*
    • In org-ql-search, accept symbol as ‘:super-groups’ argument.
@@ -941,7 +1085,7 @@ File: README.info,  Node: 032,  Next: 031,  Prev: 04,  Up: Changelog
 
 File: README.info,  Node: 031,  Next: 03,  Prev: 032,  Up: Changelog
 
-5.10 0.3.1
+5.13 0.3.1
 ==========
 
 *Fixed*
@@ -951,7 +1095,7 @@ File: README.info,  Node: 031,  Next: 03,  Prev: 032,  Up: Changelog
 
 File: README.info,  Node: 03,  Next: 023,  Prev: 031,  Up: Changelog
 
-5.11 0.3
+5.14 0.3
 ========
 
 *Added*
@@ -1016,7 +1160,7 @@ File: README.info,  Node: 03,  Next: 023,  Prev: 031,  Up: Changelog
 
 File: README.info,  Node: 023,  Next: 022,  Prev: 03,  Up: Changelog
 
-5.12 0.2.3
+5.15 0.2.3
 ==========
 
 *Fixed*
@@ -1026,7 +1170,7 @@ File: README.info,  Node: 023,  Next: 022,  Prev: 03,  Up: Changelog
 
 File: README.info,  Node: 022,  Next: 021,  Prev: 023,  Up: Changelog
 
-5.13 0.2.2
+5.16 0.2.2
 ==========
 
 *Fixed*
@@ -1037,7 +1181,7 @@ File: README.info,  Node: 022,  Next: 021,  Prev: 023,  Up: Changelog
 
 File: README.info,  Node: 021,  Next: 02,  Prev: 022,  Up: Changelog
 
-5.14 0.2.1
+5.17 0.2.1
 ==========
 
 *Fixed*
@@ -1047,7 +1191,7 @@ File: README.info,  Node: 021,  Next: 02,  Prev: 022,  Up: Changelog
 
 File: README.info,  Node: 02,  Next: 01,  Prev: 021,  Up: Changelog
 
-5.15 0.2
+5.18 0.2
 ========
 
 *Added*
@@ -1130,7 +1274,7 @@ File: README.info,  Node: 02,  Next: 01,  Prev: 021,  Up: Changelog
 
 File: README.info,  Node: 01,  Prev: 02,  Up: Changelog
 
-5.16 0.1
+5.19 0.1
 ========
 
 First tagged release.
@@ -1188,48 +1332,53 @@ GPLv3
 
 Tag Table:
 Node: Top225
-Node: Contents1521
-Node: Screenshots1644
-Node: Installation1762
-Node: Quelpa2400
-Node: Usage2843
-Node: Commands3205
-Node: org-ql-search3678
-Node: helm-org-ql5392
-Node: org-ql-view5804
-Node: org-ql-view-sidebar6304
-Node: org-ql-view-recent-items6660
-Node: org-ql-sparse-tree7144
-Node: Queries7944
-Node: Non-sexp query syntax8852
-Node: General predicates10559
-Node: Ancestor/descendant predicates15774
-Node: Date/time predicates16902
-Node: Functions / Macros19557
-Node: Agenda-like views19803
-Node: Listing / acting-on results21208
-Node: Tips25810
-Node: Changelog26141
-Node: 05-pre26780
-Node: 04627626
-Node: 04528029
-Node: 04428388
-Node: 04328745
-Node: 04228940
-Node: 04129099
-Node: 0429338
-Node: 03233269
-Node: 03133646
-Node: 0333843
-Node: 02336818
-Node: 02237046
-Node: 02137314
-Node: 0237513
-Node: 0141548
-Node: Notes41649
-Node: Comparison with Org Agenda searches41811
-Node: org-sidebar42683
-Node: License42962
+Node: Contents1594
+Node: Screenshots1717
+Node: Installation1835
+Node: Quelpa2473
+Node: Usage2916
+Node: Commands3314
+Node: org-ql-search3787
+Node: helm-org-ql5437
+Node: org-ql-view5849
+Node: org-ql-view-sidebar6349
+Node: org-ql-view-recent-items6705
+Node: org-ql-sparse-tree7189
+Node: Queries7989
+Node: Non-sexp query syntax9100
+Node: General predicates10807
+Node: Ancestor/descendant predicates16220
+Node: Date/time predicates17348
+Node: Functions / Macros20003
+Node: Agenda-like views20258
+Node: Listing / acting-on results21663
+Node: Dynamic block26858
+Node: Links29556
+Node: Tips30243
+Node: Changelog30561
+Node: 05-pre31245
+Node: 04932484
+Node: 04832762
+Node: 04733109
+Node: 04633504
+Node: 04533904
+Node: 04434263
+Node: 04334620
+Node: 04234815
+Node: 04134974
+Node: 0435215
+Node: 03239148
+Node: 03139527
+Node: 0339724
+Node: 02342699
+Node: 02242927
+Node: 02143195
+Node: 0243394
+Node: 0147429
+Node: Notes47530
+Node: Comparison with Org Agenda searches47692
+Node: org-sidebar48564
+Node: License48843
 
 End Tag Table
 

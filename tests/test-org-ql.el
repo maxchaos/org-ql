@@ -3,7 +3,7 @@
 ;; Copyright (C) 2019 Adam Porter
 
 ;; Author: Adam Porter <adam@alphapapa.net>
-;; Package-Requires: ((buttercup))
+;; Package-Requires: ((buttercup) (with-simulated-input))
 
 ;; This program is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
@@ -27,6 +27,7 @@
 ;;;; Requirements
 
 (require 'buttercup)
+(require 'with-simulated-input)
 
 (require 'org-ql)
 
@@ -116,13 +117,13 @@ Based on Buttercup macro `it'."
   (if body
       `(progn
          (buttercup-it ,(concat description " (preamble)   ")
-                       (lambda ()
-                         (let ((org-ql-use-preamble t))
-                           ,@body)))
+           (lambda ()
+             (let ((org-ql-use-preamble t))
+               ,@body)))
          (buttercup-it ,(concat description " (no preamble)")
-                       (lambda ()
-                         (let ((org-ql-use-preamble nil))
-                           ,@body))))
+           (lambda ()
+             (let ((org-ql-use-preamble nil))
+               ,@body))))
     `(buttercup-xit ,description)))
 
 (cl-defmacro org-ql-expect (ql-args results &key (buffer 'org-ql-test-buffer))
@@ -367,6 +368,53 @@ RESULTS should be a list of strings as returned by
               :to-equal '(and (todo "SOMEDAY") (ts-a :from "2020-01-01" :to "2021-01-01")))
       (expect (org-ql--plain-query "regexp:\"quoted phrase\" todo:SOMEDAY")
               :to-equal '(and (regexp "quoted phrase") (todo "SOMEDAY")))))
+
+  (describe "Convert sexp queries to non-sexp queries"
+
+    ;; FIXME: Test (src) after converting it is implemented.
+    ;; (src :lang "elisp" :regexps ("defun"))
+
+    ;; MAYBE: Other predicates?  Or should these cover the other
+    ;; cases, because the others use the same format?
+
+    (it "(heading)"
+      (expect (org-ql--query-sexp-to-string '(heading "quoted phrase" "word"))
+              :to-equal "heading:word,\"quoted phrase\""))
+    (it "(priority)"
+      (expect (org-ql--query-sexp-to-string '(priority >= B))
+              :to-equal "priority:A,B")
+      (expect (org-ql--query-sexp-to-string '(priority > B))
+              :to-equal "priority:A")
+      (expect (org-ql--query-sexp-to-string '(priority < B))
+              :to-equal "priority:C")
+      (expect (org-ql--query-sexp-to-string '(priority < A))
+              :to-equal "priority:B,C")
+      (expect (org-ql--query-sexp-to-string '(priority <= B))
+              :to-equal "priority:B,C")
+      (expect (org-ql--query-sexp-to-string '(priority = A))
+              :to-equal "priority:A"))
+    (it "(todo)"
+      (expect (org-ql--query-sexp-to-string '(todo))
+              :to-equal "todo:")
+      (expect (org-ql--query-sexp-to-string '(todo "TODO"))
+              :to-equal "todo:TODO")
+      (expect (org-ql--query-sexp-to-string '(todo "TODO" "NEXT"))
+              :to-equal "todo:NEXT,TODO"))
+    (it "(ts)"
+      (expect (org-ql--query-sexp-to-string '(ts :from -1 :to 1))
+              :to-equal "ts:from=-1,to=1")
+      (expect (org-ql--query-sexp-to-string '(ts :on today))
+              :to-equal "ts:on=today")
+      (expect (org-ql--query-sexp-to-string '(ts-active :from "2017-01-01" :to "2018-01-01"))
+              :to-equal "ts-active:from=2017-01-01,to=2018-01-01"))
+    (it "(and ...)"
+      (expect (org-ql--query-sexp-to-string '(and (tags "book" "books") (priority "A")))
+              :to-equal "tags:books,book priority:A")
+      (expect (org-ql--query-sexp-to-string '(and (tags "space") (not (regexp "moon"))))
+              :to-equal "tags:space !regexp:moon"))
+    (it "(or ...)"
+      (expect (org-ql--query-sexp-to-string '(or (tags "book" "books") (priority "A")))
+              :to-equal nil)))
 
   (describe "Query results"
 
@@ -915,6 +963,34 @@ RESULTS should be a list of strings as returned by
           '("Fruit" "Blueberry" "Strawberry")
           :buffer (org-ql-test-data-buffer "data2.org"))))
 
+    (describe "(tags-regexp), (tags*)"
+
+      (org-ql-it "without arguments"
+        (org-ql-expect ((tags-regexp))
+          '("Take over the universe" "Take over the world" "Skype with president of Antarctica" "Take over Mars" "Visit Mars" "Take over the moon" "Visit the moon" "Practice leaping tall buildings in a single bound" "Renew membership in supervillain club" "Learn universal sign language" "Order a pizza" "Get haircut" "Internet" "Spaceship lease" "Fix flux capacitor" "/r/emacs" "Shop for groceries" "Rewrite Emacs in Common Lisp" "Write a symphony"))
+        (org-ql-expect ((not (tags*)))
+          '("Recurring" "Sunrise/sunset" "Ideas")))
+
+      (org-ql-it "with a tag regexp"
+        (org-ql-expect ((tags-regexp "Emac"))
+          '("/r/emacs" "Rewrite Emacs in Common Lisp"))
+        (org-ql-expect ((not (tags* "Emac")))
+          '("Take over the universe" "Take over the world" "Skype with president of Antarctica" "Take over Mars" "Visit Mars" "Take over the moon" "Visit the moon" "Practice leaping tall buildings in a single bound" "Renew membership in supervillain club" "Learn universal sign language" "Order a pizza" "Get haircut" "Internet" "Spaceship lease" "Fix flux capacitor" "Recurring" "Shop for groceries" "Sunrise/sunset" "Ideas" "Write a symphony")))
+
+      (org-ql-it "with 2 tag regexps"
+        (org-ql-expect ((tags-regexp "Emac" "spac"))
+          '("Visit Mars" "Visit the moon" "Spaceship lease" "Fix flux capacitor" "/r/emacs" "Rewrite Emacs in Common Lisp"))
+        (org-ql-expect ((not (tags* "Emac" "spac")))
+          '("Take over the universe" "Take over the world" "Skype with president of Antarctica" "Take over Mars" "Take over the moon" "Practice leaping tall buildings in a single bound" "Renew membership in supervillain club" "Learn universal sign language" "Order a pizza" "Get haircut" "Internet" "Recurring" "Shop for groceries" "Sunrise/sunset" "Ideas" "Write a symphony")))
+
+      (org-ql-it "with regexp matching file tags"
+        (org-ql-expect ((tags-regexp "foo"))
+          '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data2.org"))
+        (org-ql-expect ((tags* "frui"))
+          '("Fruit" "Blueberry" "Strawberry")
+          :buffer (org-ql-test-data-buffer "data2.org"))))
+
     (describe "(ts)"
 
       (describe "active"
@@ -1080,7 +1156,446 @@ RESULTS should be a list of strings as returned by
       (org-ql-it "Tags and to-do"
         (org-ql-expect ((and (todo "SOMEDAY")
                              (tags "Emacs")))
-          '("Rewrite Emacs in Common Lisp"))))))
+          '("Rewrite Emacs in Common Lisp")))))
+
+  (describe "Org link safety"
+
+    ;; NOTE: These tests probably do not guarantee safety.  Still, these tests are probably
+    ;; better than nothing.  In fact, this is pretty cool: by testing for the specific error
+    ;; signal and the arguments to the error, I caught a mistake I made while writing these tests
+    ;; (leaving a closing bracket off one of the links), which caused that test to fail but for a
+    ;; different reason.  Were it not for testing the specific error AND its arguments, that test
+    ;; case would have apparently passed, but it would have hidden the mistake in the test.
+
+    ;; NOTE: Rather than calling `message' in the "evil" lambdas (which, if it succeeds
+    ;; in being evil, merely writes a string to the test output, which is EASILY missed),
+    ;; we call `error', which, in combination with testing for specific error types and
+    ;; arguments, correctly causes tests to fail if the unsafe condition is not caught.
+
+    ;; Also, while writing these tests, the version of org-super-agenda in the test sandbox does
+    ;; not have the fix applied yet, and the test for that apparently, correctly does not pass yet.
+
+    (require 'org-ql-search)
+    (require 'org-ql-view)
+
+    ;; The :auto-map test requires there to be results (because the org-super-agenda :auto-map group's
+    ;; key-form, where the safety check is, only gets evaluated when there are results).  Using
+    ;; `with-temp-buffer' in the `open-link' function causes the temp buffer to be killed before the results
+    ;; have a chance to be gathered.  So we make a test buffer and run the test in that, with a test heading.
+
+    (let ((test-buffer (get-buffer-create "*test-org-ql*")))
+      (cl-flet ((open-link
+                 (link) (with-current-buffer test-buffer
+                          (erase-buffer)
+                          (org-mode)
+                          (insert "* TODO Test heading \n\n")
+                          (insert link)
+                          (backward-char 1)
+                          (call-interactively #'org-open-at-point))))
+
+        (describe "buffers-files parameter"
+          :var ((quoted-lambda-link "[[org-ql-search:todo:?buffers-files%3D%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29]]")
+                (unquoted-lambda-link "[[org-ql-search:todo:?buffers-files%3D%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29]]")
+                (quoted-lambda-in-list-link "[[org-ql-search:todo:?buffers-files%3D%28%28quote%20%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29%29%29]]")
+                (unquoted-lambda-in-list-link "[[org-ql-search:todo:?buffers-files%3D%28%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29%29]]"))
+          (it "Errors for a quoted lambda"
+            (expect (open-link quoted-lambda-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe buffers-files parameter detected: (lambda nil (error UNSAFE))")))
+          (it "Errors for an unquoted lambda"
+            (expect (open-link unquoted-lambda-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe buffers-files parameter detected: (lambda nil (error UNSAFE))")))
+          (it "Errors for a quoted lambda in a list"
+            (if (version< (org-version) "9.3")
+                (expect (open-link quoted-lambda-in-list-link)
+                        :to-throw 'error '("CAUTION: Link not opened because unsafe buffers-files parameter detected: ((quote (lambda nil (error UNSAFE))))"))
+              (expect (open-link quoted-lambda-in-list-link)
+                      :to-throw 'error '("CAUTION: Link not opened because unsafe buffers-files parameter detected: ('(lambda nil (error UNSAFE)))"))))
+          (it "Errors for an unquoted lambda in a list"
+            (expect (open-link unquoted-lambda-in-list-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe buffers-files parameter detected: ((lambda nil (error UNSAFE)))"))))
+
+        (describe "super-groups parameter"
+          :var ((quoted-lambda-link "[[org-ql-search:todo:?super-groups%3D%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29]]")
+                (unquoted-lambda-link "[[org-ql-search:todo:?super-groups%3D%28lambda%20nil%20%28error%20%22UNSAFE%22%29%29]]")
+                (quoted-expression-link "[[org-ql-search:todo:?super-groups%3D%28error%20%22UNSAFE%22%29]]")
+                (unquoted-expression-link "[[org-ql-search:todo:?super-groups%3D%22UNSAFE%22]]")
+                (pred-selector-link "[[org-ql-search:todo:?super-groups%3D%28%28%3Apred%20%28lambda%20%28_%29%20%28error%20%22UNSAFE%22%29%29%29%29]]")
+                (auto-map-selector-link "[[org-ql-search:todo:?super-groups%3D%28%28%3Aauto-map%20%28lambda%20%28_%29%20%28error%20%22UNSAFE%22%29%29%29%29]]"))
+          (it "Errors for a quoted lambda"
+            (expect (open-link quoted-lambda-link)
+                    :to-throw 'wrong-type-argument '(listp lambda)))
+          (it "Errors for an unquoted lambda"
+            (expect (open-link unquoted-lambda-link)
+                    :to-throw 'wrong-type-argument '(listp lambda)))
+          (it "Errors for a quoted expression"
+            (expect (open-link quoted-expression-link)
+                    :to-throw 'wrong-type-argument '(listp error)))
+          (it "Errors for an unquoted expression"
+            (expect (open-link unquoted-expression-link)
+                    :to-throw 'error '("cl-etypecase failed: UNSAFE, (symbol list)")))
+
+          ;; NOTE: These two tests depend on `org-super-agenda' to signal these errors.  It's probably better
+          ;; to catch these in `org-super-agenda' rather than in `org-ql', because if other potentially unsafe
+          ;; selectors were added to org-super-agenda, org-ql would have to play catch-up, adding more tests.
+          ;; Catching them in org-super-agenda means that it can add more checks itself in the future.
+          (it "Errors for a :pred group"
+            (expect (open-link pred-selector-link)
+                    :to-throw 'error '("Unsafe groups disallowed (:pred): (lambda (_) (error UNSAFE))")))
+          (it "Errors for an :auto-map group"
+            (expect (open-link auto-map-selector-link)
+                    :to-throw 'error '("Unsafe groups disallowed (:auto-map): ((lambda (_) (error UNSAFE)))"))))
+
+        (describe "title parameter"
+          :var ((quoted-lambda-link "[[org-ql-search:todo:?title%3D%28lambda%20%28_%20_%29%20%28error%20%22UNSAFE%22%29%29]]")
+                (unquoted-lambda-link "[[org-ql-search:todo:?title%3D%28lambda%20%28_%20_%29%20%28error%20%22UNSAFE%22%29%29]]")
+                (expression-link "[[org-ql-search:todo:?title%3D%28error%20%22UNSAFE%22%29]]"))
+          (it "Errors for a quoted lambda"
+            (expect (open-link quoted-lambda-link)
+                    :to-throw 'wrong-type-argument '(characterp lambda)))
+          (it "Errors for an unquoted lambda"
+            (expect (open-link unquoted-lambda-link)
+                    :to-throw 'wrong-type-argument '(characterp lambda)))
+          (it "Errors for an expression"
+            (expect (open-link expression-link)
+                    :to-throw 'wrong-type-argument '(characterp error))))
+
+        (describe "sort parameter"
+          :var ((quoted-lambda-link "[[org-ql-search:todo:?sort%3D%28lambda%20%28_%20_%29%20%28error%20%22UNSAFE%22%29%29]]")
+                (unquoted-lambda-link "[[org-ql-search:todo:?sort%3D%28lambda%20%28_%20_%29%20%28error%20%22UNSAFE%22%29%29]]")
+                (quoted-lambda-in-list-link "[[org-ql-search:todo:?sort%3D%28%28quote%20%28lambda%20%28_%20_%29%20%28error%20%22UNSAFE%22%29%29%29%29]]")
+                (unquoted-lambda-in-list-link "[[org-ql-search:todo:?sort=((lambda%20nil%20(error%20\"UNSAFE\")))]]"))
+          (it "Errors for a quoted lambda"
+            (expect (open-link quoted-lambda-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe sort parameter detected: (lambda (_ _) (error UNSAFE))")))
+          (it "Errors for an unquoted lambda"
+            (expect (open-link unquoted-lambda-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe sort parameter detected: (lambda (_ _) (error UNSAFE))")))
+          (it "Errors for a quoted lambda in a list"
+            (if (version< (org-version) "9.3")
+                (expect (open-link quoted-lambda-in-list-link)
+                        :to-throw 'error '("CAUTION: Link not opened because unsafe sort parameter detected: ((quote (lambda (_ _) (error UNSAFE))))"))
+              (expect (open-link quoted-lambda-in-list-link)
+                      :to-throw 'error '("CAUTION: Link not opened because unsafe sort parameter detected: ('(lambda (_ _) (error UNSAFE)))"))))
+          (it "Errors for an unquoted lambda in a list"
+            (expect (open-link unquoted-lambda-in-list-link)
+                    :to-throw 'error '("CAUTION: Link not opened because unsafe sort parameter detected: ((lambda nil (error UNSAFE)))")))))))
+
+  (describe "View saving/loading"
+    :var* ((temp-dir (make-temp-file "test-org-ql-" 'dir))
+           (temp-filenames (cl-loop for file in '("test1.org" "test2.org")
+                                    collect (expand-file-name file temp-dir)))
+           (file-contents (with-temp-buffer
+                            (insert "#+TITLE: Test data\n\n"
+                                    "* TODO Heading 1\n"
+                                    "Heading 1 text.\n\n"
+                                    "* Heading 2\n"
+                                    "Heading 2 text.\n")
+                            (buffer-string))))
+
+    ;; This section will test saving and loading search views by a few different
+    ;; means.  In each one, the values of these buffer-local variables will be
+    ;; stored before saving a view and compared after loading it:
+
+    ;; - org-ql-view-buffers-files
+    ;; - org-ql-view-query
+    ;; - org-ql-view-sort
+    ;; - org-ql-view-super-groups
+    ;; - org-ql-view-title
+
+    ;; `org-ql-view-buffers-files' needs to be tested with these kinds of values:
+
+    ;; - A buffer
+    ;; - A string (filename)
+    ;; - List of buffers
+    ;; - List of strings (filenames)
+    ;; - Combination
+
+    ;; `org-ql-view-query' needs to be tested with these kinds of values:
+
+    ;; - String query
+    ;; - Sexp query
+
+    ;; `org-ql-view-sort' needs to be tested with these kinds of values:
+
+    ;; - Symbol
+    ;; - List of symbols
+
+    ;; `org-ql-view-super-groups' can probably be tested with nearly
+    ;; any list value (because this set of tests is not intended to
+    ;; test link safety).
+
+    ;; TODO: `org-ql-view-title' needs to be tested with a string value.
+
+    (before-all
+      (dolist (filename temp-filenames)
+        (with-temp-file filename
+          (insert file-contents))))
+
+    (after-all
+      (delete-directory temp-dir 'recursive))
+
+    (describe "Bookmarks"
+      :var ((title "ORG-QL-TEST")
+            bookmark-alist
+            view-buffer)
+
+      (before-each
+        (setf view-buffer (get-buffer-create "*TEST*"))
+        (dolist (filename temp-filenames)
+          ;; Kill any existing buffers visiting these files.
+          (when-let ((buffer (find-file-noselect filename 'nowarn)))
+            (kill-buffer buffer))))
+
+      (cl-flet ((var-after-bookmark-set-and-jump
+                 (var buffers-files query &key sort super-groups)
+                 (org-ql-search buffers-files query
+                   :super-groups super-groups
+                   :sort sort :title title :buffer view-buffer)
+                 (set-buffer view-buffer)
+                 (bookmark-set title)
+                 (kill-buffer)
+                 (bookmark-jump title)
+                 (buffer-local-value var (get-buffer (concat "*Org QL View: " title "*")))))
+
+        (describe "Grouping"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (super-groups '((:auto-priority))))
+          (it "is restored"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-super-groups temp-filenames query
+                                                     :super-groups super-groups)
+                    :to-equal super-groups)))
+
+        (describe "Queries"
+          :var ((string-query "todo:TODO regexp:heading")
+                (sexp-query '(and (todo "TODO") (regexp "heading"))))
+          (it "Sexps match"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-query temp-filenames sexp-query) :to-equal sexp-query))
+          (it "Strings match"
+            ;; NOTE: This test includes the string query being replaced with its sexp form after the query is run.
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-query temp-filenames string-query)
+                    :to-equal sexp-query)))
+
+        (describe "Sorting"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (sorter 'todo)
+                (multiple-sorters '(todo priority)))
+          (it "One sorter is restored"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-sort temp-filenames query :sort sorter)
+                    :to-equal sorter))
+          (it "Multiple sorters are restored"
+            ;; NOTE: This test includes the string query being replaced with its sexp form after the query is run.
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-sort temp-filenames query :sort multiple-sorters)
+                    :to-equal multiple-sorters)))
+
+        (describe "Buffers/Files"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (one-filename (car temp-filenames)))
+          (it "One filename matches"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-buffers-files one-filename query)
+                    :to-equal one-filename))
+          (it "A list of filenames matches"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-buffers-files temp-filenames query)
+                    :to-equal temp-filenames))
+          ;; NOTE: These actually bookmark the filenames backing the buffers.
+          (it "One buffer matches"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-buffers-files
+                                                     (find-file-noselect (car temp-filenames)) query)
+                    :to-equal one-filename))
+          (it "A list of buffers matches"
+            (expect (var-after-bookmark-set-and-jump 'org-ql-view-buffers-files
+                                                     (mapcar #'find-file-noselect temp-filenames) query)
+                    :to-equal temp-filenames)))))
+
+    (describe "Dynamic blocks"
+      (describe "warn about sexp queries"
+
+        (cl-flet ((test-dblock
+                   (&optional input) (with-current-buffer (get-buffer-create "*TEST DBLOCK*")
+                                       (erase-buffer)
+                                       (org-mode)
+                                       (insert "* TODO Heading 1\n\n"
+                                               "#+BEGIN: org-ql :query (or (todo) (regexp \"Heading\")) :columns (todo)\n"
+                                               "#+END:")
+                                       (goto-char (point-min))
+                                       (forward-line 2)
+                                       (with-simulated-input input
+                                         (org-dblock-update))
+                                       (kill-buffer))))
+
+          (it "when org-ql-ask-unsafe-queries is non-nil"
+            ;; TODO: Should the query be converted to string form if possible and only warn if not?
+            (let ((org-ql-ask-unsafe-queries t))
+              (expect (test-dblock "no RET")
+                      :to-throw 'user-error '("Query aborted by user"))))
+
+          (it "unless org-ql-ask-unsafe-queries is nil"
+            ;; TODO: Should the query be converted to string form if possible and only warn if not?
+            (let ((org-ql-ask-unsafe-queries nil))
+              (expect (test-dblock)
+                      :not :to-throw))))))
+
+    (describe "Links"
+      ;; Not sure if this binding works.
+      :var ((title "ORG-QL-TEST")
+            (view-buffer-name "*TEST VIEW BUFFER*")
+            link-buffer view-buffer)
+
+      (before-each
+        (kill-buffer (get-buffer view-buffer-name))
+        (setf link-buffer (get-buffer-create "*TEST LINK BUFFER*")
+              view-buffer (get-buffer-create view-buffer-name))
+        (with-current-buffer link-buffer
+          (erase-buffer)
+          (insert "* TODO Test heading\n\n")
+          (org-mode)))
+
+      (cl-flet* ((open-link-in
+                  (link buffer input)
+                  ;; Org REDUCED THE NUMBER OF ARGUMENTS TO `org-open-link-from-string'!  That BREAKS BACKWARD
+                  ;; COMPATIBILITY!  So I have to make my own function so these tests can work across Org versions!
+                  (with-current-buffer buffer
+                    (erase-buffer)
+                    (org-mode)
+                    (insert "* TODO Test heading\n\n")
+                    (insert link)
+                    (backward-char 1)
+                    (with-simulated-input input
+                      (org-open-at-point))))
+
+                 (var-after-link-save-open
+                  (var buffers-files query &key sort super-groups
+                       (buffer link-buffer) (store-input "RET") open-input)
+                  (org-ql-search buffers-files query
+                    :super-groups super-groups
+                    :sort sort :title title :buffer view-buffer)
+                  (with-current-buffer view-buffer
+                    (cl-assert (member '("org-ql-search" :follow org-ql-view--link-open :store org-ql-view--link-store)
+                                       org-link-parameters)
+                               t)
+                    (with-simulated-input store-input
+                      ;; Avoid writing "Stored: ..." to test output.
+                      (let ((inhibit-message t))
+                        (call-interactively #'org-store-link nil)))
+                    (kill-buffer))
+                  (cl-assert (and org-stored-links (caar org-stored-links)) t)
+                  (open-link-in (caar org-stored-links) buffer open-input)
+                  (with-current-buffer (get-buffer (concat "*Org QL View: " title "*"))
+                    (prog1 (buffer-local-value var (current-buffer))
+                      (kill-buffer)))))
+
+        (describe "Queries"
+          :var ((string-query "todo:TODO regexp:heading")
+                (string-query-in-sexp-form '(and (todo "TODO") (regexp "heading")))
+                ;; NOTE: The sexp query must be one that `org-ql--query-sexp-to-string'
+                ;; can't convert to a string.
+                (sexp-query '(or (todo "TODO") (regexp "heading"))))
+
+          (describe "in sexp form"
+
+            (describe "prompt when `org-ql-ask-unsafe-queries' is non-nil"
+              :var ((org-ql-ask-unsafe-queries t))
+
+              (it "and signal an error when rejected by user"
+                (expect (var-after-link-save-open 'org-ql-view-query temp-filenames sexp-query
+                                                  :open-input "no RET")
+                        :to-throw 'user-error '("Query aborted by user")))
+              (it "and run when approved by user"
+                (expect (var-after-link-save-open 'org-ql-view-query temp-filenames sexp-query
+                                                  :open-input "yes RET")
+                        :to-equal sexp-query)))
+
+            (it "don't prompt when `org-ql-ask-unsafe-queries' is nil"
+              (let ((org-ql-ask-unsafe-queries nil))
+                (expect (var-after-link-save-open 'org-ql-view-query temp-filenames sexp-query)
+                        :to-equal sexp-query)))
+
+            (it "match after restoring"
+              (let ((org-ql-ask-unsafe-queries nil)) ; Disable safety check for this test.
+                (expect (var-after-link-save-open 'org-ql-view-query temp-filenames sexp-query)
+                        :to-equal sexp-query))))
+
+          (describe "in raw sexp form"
+            ;; These tests guard against manually constructed queries, which could
+            ;; theoretically be different than the ones resulting from storing links (i.e. they
+            ;; might have encoding).  These tests probably aren't necessary, but it's good to
+            ;; be extra careful, because an evil sexp could be harmful if eval'ed.
+            :var ((raw-link "[[org-ql-search:(todo \"TODO\")]]"))
+
+            (describe "prompt when `org-ql-ask-unsafe-queries' is non-nil"
+              :var ((org-ql-ask-unsafe-queries t))
+
+              (it "and signal an error when rejected by user"
+                (expect (open-link-in raw-link link-buffer "no RET")
+                        :to-throw 'user-error '("Query aborted by user")))
+              (it "and run when approved by user"
+                (expect (open-link-in raw-link link-buffer "yes RET")
+                        :not :to-throw)))
+
+            (it "don't prompt when `org-ql-ask-unsafe-queries' is nil"
+              (let ((org-ql-ask-unsafe-queries nil))
+                (expect (open-link-in raw-link link-buffer "no RET")
+                        :not :to-throw)))
+
+            (it "match after restoring"
+              (let ((org-ql-ask-unsafe-queries nil) ; Disable safety check for this test.
+                    (org-ql-view-buffer view-buffer))
+                (expect (open-link-in raw-link link-buffer "no RET")
+                        :not :to-throw)
+                (expect (buffer-local-value 'org-ql-view-query view-buffer)
+                        :to-equal '(todo "TODO"))))
+
+            (it "could be evil when not prompted about"
+              ;; This test confirms what *could* happen if these checks weren't in place.
+              (let ((org-ql-ask-unsafe-queries nil))
+                (expect (open-link-in "[[org-ql-search:(error \"EVIL!\")]]" link-buffer nil)
+                        :to-throw 'error '("EVIL!")))))
+
+          (describe "in string form"
+            (it "match after restoring"
+              ;; NOTE: This test includes the string query being replaced with its sexp form after the query is run.
+              (expect (var-after-link-save-open 'org-ql-view-query temp-filenames string-query)
+                      :to-equal string-query-in-sexp-form))))
+
+        (describe "Grouping"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (super-groups '((:auto-priority))))
+          (it "is restored"
+            (expect (var-after-link-save-open 'org-ql-view-super-groups temp-filenames query
+                                              :super-groups super-groups)
+                    :to-equal super-groups)))
+
+        (describe "Sorting"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (sorter 'todo)
+                (multiple-sorters '(todo priority)))
+          (it "One sorter is restored"
+            (expect (var-after-link-save-open 'org-ql-view-sort temp-filenames query :sort sorter)
+                    :to-equal sorter))
+          (it "Multiple sorters are restored"
+            ;; NOTE: This test includes the string query being replaced with its sexp form after the query is run.
+            (expect (var-after-link-save-open 'org-ql-view-sort temp-filenames query :sort multiple-sorters)
+                    :to-equal multiple-sorters)))
+
+        (describe "Buffers/Files"
+          :var ((query '(and (todo "TODO") (regexp "heading")))
+                (one-filename (car temp-filenames)))
+          (it "Can search a file by filename"
+            (expect (var-after-link-save-open 'org-ql-view-buffers-files one-filename query
+                                              :store-input "M-n M-n RET")
+                    :to-equal one-filename))
+          (it "Can search multiple files by filename"
+            (expect (var-after-link-save-open 'org-ql-view-buffers-files temp-filenames query
+                                              :store-input "M-n M-n RET")
+                    :to-equal temp-filenames))
+          (it "Can search buffer containing the link"
+            ;; This is sort-of a special case because of how the test link-opening function works.
+            (expect (var-after-link-save-open 'org-ql-view-buffers-files one-filename query
+                                              :buffer link-buffer)
+                    :to-equal link-buffer)))))
+
+    ;; MAYBE: Also test `org-ql-views', although I already know it works now.
+    ;; (describe "org-ql-views")
+    ))
 
 ;; Local Variables:
 ;; truncate-lines: t

@@ -2,7 +2,6 @@
 
 ;; Author: Adam Porter <adam@alphapapa.net>
 ;; Url: https://github.com/alphapapa/org-ql
-;; Package-Requires: ((transient) (map "2.0"))
 
 ;;; Commentary:
 
@@ -398,6 +397,8 @@ update search arguments."
            insert))
     (current-buffer)))
 
+(defvar bookmark-make-record-function)
+
 (cl-defun org-ql-view--display (&key (buffer org-ql-view-buffer) header string)
   "Display STRING in `org-ql-view' BUFFER.
 
@@ -425,7 +426,7 @@ subsequent refreshing of the buffer: `org-ql-view-buffers-files',
                    (null (org-ql-view--buffer buffer))
                    (buffer buffer))))
     (with-current-buffer buffer
-      (setq-local bookmark-make-record-function #'org-ql-view--bookmark-make-record)
+      (setq-local bookmark-make-record-function #'org-ql-view-bookmark-make-record)
       (use-local-map org-ql-view-map)
       ;; Prepare buffer, saving data for refreshing.
       (cl-loop for symbol in vars
@@ -521,39 +522,43 @@ dates in the past, and negative for dates in the future."
 
 ;; Support for Emacs bookmarks.
 
-(eval-when-compile
-  (require 'bookmark))
+(require 'bookmark)
 
-(defun org-ql-view--bookmark-make-record ()
+(defun org-ql-view-bookmark-make-record ()
   "Return a bookmark record for the current Org QL View buffer."
   (cl-labels ((file-nameize
-               (b-f) (or (buffer-file-name b-f)
-                         (when (buffer-base-buffer b-f)
-                           (buffer-file-name (buffer-base-buffer b-f)))
-                         (user-error "Only file-backed buffers can be bookmarked by Org QL View: %s" b-f))))
-    (pcase-let* ((plist (org-ql-view--plist (current-buffer)))
-                 ((map :buffers-files) plist))
+               (b-f) (cl-typecase b-f
+                       (string b-f)
+                       (buffer (or (buffer-file-name b-f)
+                                   (when (buffer-base-buffer b-f)
+                                     (buffer-file-name (buffer-base-buffer b-f)))))
+                       (t (user-error "Only file-backed buffers can be bookmarked by Org QL View: %s" b-f)))))
+    (-let* ((plist (org-ql-view--plist (current-buffer)))
+            ((&plist :buffers-files) plist))
       ;; Replace buffers with their filenames, and signal error if any are not file-backed.
       (setf plist (plist-put plist :buffers-files
                              (cl-etypecase buffers-files
                                (string buffers-files)
                                (buffer (file-nameize buffers-files))
-                               (list (cl-loop for b-f in buffers-files
-                                              collect (file-nameize b-f))))))
+                               (list (mapcar #'file-nameize buffers-files)))))
       (list (concat "Org QL View: " org-ql-view-title)
             (cons 'org-ql-view-plist plist)
-            (cons 'handler #'org-ql-view--bookmark-handler)
+            (cons 'handler #'org-ql-view-bookmark-handler)
             (cons 'position (point))))))
 
 ;;;###autoload
-(defun org-ql-view--bookmark-handler (bookmark)
+(defun org-ql-view-bookmark-handler (bookmark)
   "Show Org QL View BOOKMARK in current buffer."
-  (pcase-let* (((map org-ql-view-plist) (bookmark-get-bookmark-record bookmark))
-               ((map :buffers-files :query :super-groups :narrow :sort :title)
-                org-ql-view-plist)
-               (super-groups (cl-etypecase super-groups
-                               (symbol (symbol-value super-groups))
-                               (list super-groups))))
+  ;; FIXME: `pcase-let*' is easier to use to destructure this, but if I use
+  ;; that, I want to use map 2.1 for the extra convenience, but I can't force
+  ;; that to be installed into the makem.sh sandbox, so I just use `-let*' here.
+  (-let* ((record (bookmark-get-bookmark-record bookmark))
+          ((&alist 'org-ql-view-plist) record)
+          ((&plist :buffers-files :query :super-groups :narrow :sort :title)
+           org-ql-view-plist)
+          (super-groups (cl-etypecase super-groups
+                          (symbol (symbol-value super-groups))
+                          (list super-groups))))
     (org-ql-search buffers-files query
       :super-groups super-groups :narrow narrow :sort sort :title title)
     ;; HACK: `bookmark--jump-via' expects that, when the handler returns, the current buffer
@@ -564,6 +569,121 @@ dates in the past, and negative for dates in the future."
     ;; returns a buffer which can be displayed by the calling function.  But that would be
     ;; more complicated and might introduce bugs elsewhere, so we'll just do this for now.
     (set-buffer (window-buffer (selected-window)))))
+
+;;;; Links
+
+;; This section implements support for Org links to Org QL searches.  Since the
+;; links are stored from and opened in `org-ql-view' buffers, this section resides
+;; in this file.  However, since the links are to `org-ql-search' searches rather
+;; than `org-ql-view' saved views, the link type is "org-ql-search".
+
+(org-link-set-parameters "org-ql-search"
+                         :follow #'org-ql-view--link-open
+                         :store #'org-ql-view--link-store)
+
+;; We require the URL libraries in the functions to hopefully avoid
+;; loading them until they're needed.
+
+(eval-when-compile
+  (require 'url-parse)
+  (require 'url-util))
+
+(defun org-ql-view--link-open (path)
+  "Open Org QL query for current buffer at PATH.
+PATH should be the part of an \"org-ql-search:\" URL after the
+protocol.  See, e.g. `org-ql-view--link-store'."
+  (require 'url-parse)
+  (require 'url-util)
+  (when (version<= "9.3" (org-version))
+    ;; Org 9.3+ makes a backward-incompatible change to link escaping.
+    ;; I don't think it would be a good idea to try to guess whether
+    ;; the string received by this function was made with or without
+    ;; that change, so we'll just test the current version of Org.
+    ;; Any links created with older Org versions and then opened with
+    ;; newer ones will have to be recreated.
+    (setf path (url-unhex-string path)))
+  (pcase-let* ((`(,query . ,params) (url-path-and-query
+                                     (url-parse-make-urlobj "org-ql-search" nil nil nil nil
+                                                            path)))
+               (query (url-unhex-string query))
+               (params (when params (url-parse-query-string params)))
+               ;; `url-parse-query-string' returns "improper" alists, which makes this awkward.
+               (sort (when-let* ((stored-string (alist-get "sort" params nil nil #'string=))
+                                 (read-value (read stored-string)))
+                       ;; Ensure the value is either a symbol or list of symbols (which excludes lambdas).
+                       (unless (or (symbolp read-value) (cl-every #'symbolp read-value))
+                         (error "CAUTION: Link not opened because unsafe sort parameter detected: %s"
+                                read-value))
+                       read-value))
+               (org-super-agenda-allow-unsafe-groups nil) ; Disallow unsafe group selectors.
+               (groups (--when-let (alist-get "super-groups" params nil nil #'string=)
+                         (read it)))
+               (title (--when-let (alist-get "title" params nil nil #'string=)
+                        (read it)))
+               (buffers-files (--if-let (alist-get "buffers-files" params nil nil #'string=)
+                                  (org-ql-view--expand-buffers-files (read it))
+                                (current-buffer))))
+    (unless (or (bufferp buffers-files)
+                (stringp buffers-files)
+                (cl-every #'stringp buffers-files))
+      (error "CAUTION: Link not opened because unsafe buffers-files parameter detected: %s" buffers-files))
+    (when (or (listp query)
+              (string-match (rx bol (0+ space) "(") query))
+      ;; SAFETY: Query is in sexp form: ask for confirmation, because it could contain arbitrary code.
+      (org-ql--ask-unsafe-query query))
+    (org-ql-search buffers-files query
+      :sort sort
+      :super-groups groups
+      :title title)))
+
+(defun org-ql-view--link-store ()
+  "Store a link to the current Org QL view.
+When opened, the link searches the buffer it's opened from."
+  (require 'url-parse)
+  (require 'url-util)
+  (when org-ql-view-query
+    ;; Only Org QL View buffers should have `org-ql-view-query' set.
+    (cl-labels ((prompt-for (buffers-files)
+                            (pcase-exhaustive
+                                (completing-read (format "Make link that searches: ")
+                                                 '("file link is in" "files currently searched")
+                                                 nil t nil nil "file link is in")
+                              ("file link is in" nil)
+                              ("files currently searched" buffers-files)))
+                (strings-or-file-buffers-p
+                 (thing) (cl-etypecase thing
+                           (list (cl-every #'strings-or-file-buffers-p thing))
+                           (string thing)
+                           (buffer (or (buffer-file-name thing)
+                                       ;; TODO: Should indirect buffers be allowed?  Maybe not, since their narrowing isn't preserved.
+                                       ;; On the other hand, it's possible to accidentally make a search view for an indirect buffer
+                                       ;; that's since been widened, and forcing the user to manually change that would be awkward,
+                                       ;; and trying to communicate the problem would be difficult, so maybe it's okay to allow it.
+                                       (when (buffer-base-buffer thing)
+                                         (buffer-file-name (buffer-base-buffer thing))))))))
+      (unless (strings-or-file-buffers-p org-ql-view-buffers-files)
+        (user-error "Views that search non-file-backed buffers can't be linked to"))
+      (let* ((query-string (--if-let (org-ql--query-sexp-to-string org-ql-view-query)
+                               it (org-ql-view--format-query org-ql-view-query)))
+             (buffers-files (prompt-for (org-ql-view--contract-buffers-files org-ql-view-buffers-files)))
+             (params (list (when buffers-files
+                             (list "buffers-files" (prin1-to-string buffers-files)))
+                           (when org-ql-view-super-groups
+                             (list "super-groups" (prin1-to-string org-ql-view-super-groups)))
+                           (when org-ql-view-sort
+                             (list "sort" (prin1-to-string org-ql-view-sort)))
+                           (when org-ql-view-title
+                             (list "title" (prin1-to-string org-ql-view-title)))))
+             (filename (concat (url-hexify-string query-string)
+                               "?" (url-build-query-string (delete nil params))))
+             (url (url-recreate-url (url-parse-make-urlobj "org-ql-search" nil nil nil nil
+                                                           filename))))
+	;; FIXME: "Warning: ‘org-store-link-props’ is an obsolete function (as of Org 9.3); use ‘org-link-store-props’ instead"
+        (org-store-link-props
+         :type "org-ql-search"
+         :link url
+         :description (concat "org-ql-search: " org-ql-view-title))))
+    t))
 
 ;;;; Transient
 
@@ -723,15 +843,18 @@ return an empty string."
                        (org-element-property :raw-value it)
                        (org-link-display-format it)))
            (todo-keyword (-some--> (org-element-property :todo-keyword element)
-                                   (org-ql-view--add-todo-face it)))
+                           (org-ql-view--add-todo-face it)))
            (tag-list (if org-use-tag-inheritance
                          ;; MAYBE: Use our own variable instead of `org-use-tag-inheritance'.
                          (if-let ((marker (or (org-element-property :org-hd-marker element)
                                               (org-element-property :org-marker element))))
-                             (cl-loop for type in (org-ql--tags-at marker)
-                                      unless (or (eq 'org-ql-nil type)
-                                                 (not type))
-                                      append type)
+                             (with-current-buffer (marker-buffer marker)
+                               (org-with-wide-buffer
+                                (goto-char marker)
+                                (cl-loop for type in (org-ql--tags-at marker)
+                                         unless (or (eq 'org-ql-nil type)
+                                                    (not type))
+                                         append type)))
                            ;; No marker found
                            ;; TODO: Use `display-warning' with `org-ql' as the type.
                            (warn "No marker found for item: %s" title)
@@ -744,9 +867,9 @@ return an empty string."
                               (org-add-props it nil 'face 'org-tag))))
            ;;  (category (org-element-property :category element))
            (priority-string (-some->> (org-element-property :priority element)
-                                      (char-to-string)
-                                      (format "[#%s]")
-                                      (org-ql-view--add-priority-face)))
+                              (char-to-string)
+                              (format "[#%s]")
+                              (org-ql-view--add-priority-face)))
            (habit-property (org-with-point-at (org-element-property :begin element)
                              (when (org-is-habit-p)
                                (org-habit-parse-todo))))
@@ -877,6 +1000,9 @@ property."
 
 ;;;;; Completion
 
+;; These functions are somewhat regrettable because of the need to keep them
+;; in sync, but it seems worth it to provide users with the flexibility.
+
 (defun org-ql-view--contract-buffers-files (buffers-files)
   "Return BUFFERS-FILES in its \"contracted\" form.
 The contracted form is \"org-agenda-files\" if BUFFERS-FILES
@@ -897,16 +1023,18 @@ current buffer.  Otherwise BUFFERS-FILES is returned unchanged."
        (pcase (expand-files buffers-files)
          ((pred (seq-set-equal-p (mapcar #'expand-file-name (org-agenda-files))))
           "org-agenda-files")
-         ((pred (seq-set-equal-p (org-ql-search-directories-files)))
+         ((and (guard (file-exists-p org-directory))
+               (pred (seq-set-equal-p (org-ql-search-directories-files
+                                       :directories (list org-directory)))))
           "org-directory")
-         (_ (let ((print-length nil))
-              (concat "'" (prin1-to-string buffers-files))))))
+         (_ buffers-files)))
       ((pred (equal (current-buffer)))
        "buffer")
       ((or 'org-agenda-files '(function org-agenda-files))
        "org-agenda-files")
-      (_ (let ((print-length nil))
-           (prin1-to-string buffers-files))))))
+      ((and (pred bufferp) (guard (buffer-file-name buffers-files)))
+       (buffer-file-name buffers-files))
+      (_ buffers-files))))
 
 (defun org-ql-view--complete-buffers-files ()
   "Return value for `org-ql-view-buffers-files' using completion."
@@ -919,17 +1047,24 @@ current buffer.  Otherwise BUFFERS-FILES is returned unchanged."
         ;; Buffers can't be input by name, so if the default value is a buffer, just use it.
         ;; TODO: Find a way to fix this.
         org-ql-view-buffers-files
-      (pcase-exhaustive
-          (completing-read "Buffers/Files: "
-                           (list 'buffer 'org-agenda-files 'org-directory 'all)
-                           nil nil (initial-input))
-        ((or "" "buffer") (current-buffer))
-        ("org-agenda-files" (org-agenda-files))
-        ("all" (--select (equal (buffer-local-value 'major-mode it) 'org-mode)
-                         (buffer-list)))
-        ("org-directory" (org-ql-search-directories-files))
-        ((and form (guard (rx bos "("))) (-flatten (eval (read form))))
-        (else (s-split (rx (1+ space)) else))))))
+      (org-ql-view--expand-buffers-files
+       (completing-read "Buffers/Files: "
+                        (list 'buffer 'org-agenda-files 'org-directory 'all)
+                        nil nil (initial-input))))))
+
+(defun org-ql-view--expand-buffers-files (buffers-files)
+  "Return BUFFERS-FILES expanded to a list of files or buffers.
+The counterpart to `org-ql-view--contract-buffers-files'."
+  (pcase-exhaustive buffers-files
+    ("all" (--select (equal (buffer-local-value 'major-mode it) 'org-mode)
+                     (buffer-list)))
+    ("org-agenda-files" (org-agenda-files))
+    ("org-directory" (org-ql-search-directories-files))
+    ((or "" "buffer") (current-buffer))
+    ((pred bufferp) buffers-files)
+    ((pred listp) buffers-files)
+    ;; A single filename.
+    ((pred stringp) buffers-files)))
 
 (defun org-ql-view--complete-super-groups ()
   "Return value for `org-ql-view-super-groups' using completion."
