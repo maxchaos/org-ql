@@ -887,7 +887,33 @@ RESULTS should be a list of strings as returned by
           :buffer (org-ql-test-data-buffer "data2.org"))
         (org-ql-expect ((tags "fruit"))
           '("Fruit" "Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data2.org")))
+
+      (org-ql-it "with tag hierarchy"
+        (org-ql-expect ((tags "groceries"))
+          '("Meat" "Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "food"))
+          '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "meat"))
+          '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "fish"))
+          '("Fish" "Tuna" "Salmon")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "beef"))
+          '("Beef")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "produce"))
+          '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "vegetable"))
+          '("Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags "fruit"))
+          '("Fruit" "Blueberry" "Strawberry")
+          :buffer (org-ql-test-data-buffer "data3.org"))))
 
     (describe "(tags-inherited)"
 
@@ -918,7 +944,33 @@ RESULTS should be a list of strings as returned by
           :buffer (org-ql-test-data-buffer "data2.org"))
         (org-ql-expect ((tags-inherited "fruit"))
           '("Blueberry" "Strawberry")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data2.org")))
+
+      (org-ql-it "with tag hierarchy"
+        (org-ql-expect ((tags-inherited "groceries"))
+          '("Meat" "Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "food"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "meat"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "fish"))
+          '("Tuna" "Salmon")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "beef"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "produce"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "vegetable"))
+          '("Broccoli" "Potato")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-inherited "fruit"))
+          '("Blueberry" "Strawberry")
+          :buffer (org-ql-test-data-buffer "data3.org"))))
 
     (describe "(tags-local)"
 
@@ -948,7 +1000,33 @@ RESULTS should be a list of strings as returned by
           :buffer (org-ql-test-data-buffer "data2.org"))
         (org-ql-expect ((tags-local "fruit"))
           '("Fruit")
-          :buffer (org-ql-test-data-buffer "data2.org"))))
+          :buffer (org-ql-test-data-buffer "data2.org")))
+
+      (org-ql-it "with tag hierarchy"
+        (org-ql-expect ((tags-local "groceries"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "food"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "meat"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "fish"))
+          '("Fish")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "beef"))
+          '("Beef")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "produce"))
+          nil
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "vegetable"))
+          '("Vegetable")
+          :buffer (org-ql-test-data-buffer "data3.org"))
+        (org-ql-expect ((tags-local "fruit"))
+          '("Fruit")
+          :buffer (org-ql-test-data-buffer "data3.org"))))
 
     (describe "(tags-all), (tags&)"
 
