@@ -1,7 +1,7 @@
 # * test.yml --- Test Emacs packages using makem.sh on GitHub Actions
 
 # URL: https://github.com/alphapapa/makem.sh
-# Version: 0.2
+# Version: 0.3
 
 # * Commentary:
 
@@ -31,8 +31,8 @@ on:
   pull_request:
   push:
     # Comment out this section to enable testing of all branches.
-    branches:
-      - master
+    # branches:
+    #   - master
 
 jobs:
   build:

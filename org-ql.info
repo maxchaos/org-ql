@@ -28,6 +28,8 @@ org-ql
 Installation
 
 * Quelpa::
+* Helm support::
+
 
 
 Usage
@@ -63,10 +65,12 @@ Functions / Macros
 
 * Agenda-like views::
 * Listing / acting-on results::
+* Custom predicates::
 
 Changelog
 
-* 0.5-pre: 05-pre. 
+* 0.6-pre: 06-pre. 
+* 0.5: 05. 
 * 0.4.9: 049. 
 * 0.4.8: 048. 
 * 0.4.7: 047. 
@@ -98,7 +102,8 @@ syntax styles: Lisp-like sexps and search engine-like keywords.
 
    It includes three libraries: The org-ql library is flexible and may
 be used as a backend for other tools.  The libraries org-ql-search and
-helm-org-ql provide interactive search commands and saved views.
+helm-org-ql (a separate package) provide interactive search commands and
+saved views.
 
 
 File: README.info,  Node: Contents,  Next: Screenshots,  Prev: Top,  Up: Top
@@ -119,24 +124,21 @@ File: README.info,  Node: Installation,  Next: Usage,  Prev: Screenshots,  Up: T
 3 Installation
 **************
 
-The package may be installed directly from MELPA
+The package org-ql may be installed directly from MELPA
 (https://melpa.org/#/org-ql) or with other tools like Quelpa
 (https://framagit.org/steckerhalter/quelpa).
 
    After installation, you can use the commands without additional
-configuration.  _Note: The command helm-org-ql only works if the package
-helm-org is installed; Helm is not a dependency of this package, so it’s
-not automatically installed._
-
-   To use the functions and macros in your own Elisp code, use libraries
-org-ql and org-ql-view.
+configuration.  To use the functions and macros in your own Elisp code,
+use libraries org-ql and org-ql-view.
 
 * Menu:
 
 * Quelpa::
+* Helm support::
 
 
-File: README.info,  Node: Quelpa,  Up: Installation
+File: README.info,  Node: Quelpa,  Next: Helm support,  Up: Installation
 
 3.1 Quelpa
 ==========
@@ -150,7 +152,21 @@ easy:
   2. Add this form to your init file:
 
      (use-package org-ql
-       :quelpa (org-ql :fetcher github :repo "alphapapa/org-ql"))
+       :quelpa (org-ql :fetcher github :repo "alphapapa/org-ql"
+                 :files (:defaults (:exclude "helm-org-ql.el"))))
+
+
+File: README.info,  Node: Helm support,  Prev: Quelpa,  Up: Installation
+
+3.2 Helm support
+================
+
+The command helm-org-ql is available in the package helm-org-ql.  It may
+be installed from MELPA, or with Quelpa, like so:
+
+     (use-package helm-org-ql
+       :quelpa (helm-org-ql :fetcher github :repo "alphapapa/org-ql"
+                            :files ("helm-org-ql.el")))
 
 
 File: README.info,  Node: Usage,  Next: Changelog,  Prev: Installation,  Up: Top
@@ -248,11 +264,10 @@ File: README.info,  Node: helm-org-ql,  Next: org-ql-view,  Prev: org-ql-search,
 4.1.2 helm-org-ql
 -----------------
 
-_Note: This command uses ._
+_Note: This command uses .  It is available separately in the package
+helm-org-ql._
 
-   This command displays matches with Helm.  *Note:* Helm is not a
-package dependency, so this command only works if the package helm-org
-is installed.
+   This command displays matches with Helm.
 
    • Press C-x C-s in the Helm session to save the results to an
      org-ql-search buffer.
@@ -564,11 +579,13 @@ File: README.info,  Node: Functions / Macros,  Next: Dynamic block,  Prev: Queri
 
    • 
         • • 
-        • • • 
+        • • • • • 
+        • 
 * Menu:
 
 * Agenda-like views::
 * Listing / acting-on results::
+* Custom predicates::
 
 
 File: README.info,  Node: Agenda-like views,  Next: Listing / acting-on results,  Up: Functions / Macros
@@ -605,7 +622,7 @@ File: README.info,  Node: Agenda-like views,  Next: Listing / acting-on results,
      the block header, otherwise the header is formed automatically.
 
 
-File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,  Up: Functions / Macros
+File: README.info,  Node: Listing / acting-on results,  Next: Custom predicates,  Prev: Agenda-like views,  Up: Functions / Macros
 
 4.3.2 Listing / acting-on results
 ---------------------------------
@@ -613,15 +630,19 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
   1. Caching
 
      Org QL uses a per-buffer cache to speed up subsequent searches.
-     It’s keyed on query expressions, which means that, for the same
-     query in the same buffer, if the buffer has not been modified since
-     the last time the query was run, the cached result will be
-     returned, and the query will not be evaluated in that buffer again.
+     It’s keyed on query expressions and match actions, which means
+     that, for the same query and same match action in the same buffer,
+     if the buffer has not been modified since the last time the query
+     was run, the cached match-action result will be returned, and the
+     query will not be evaluated in that buffer again.
 
-     Therefore, since query expressions are not guaranteed to be
-     evaluated when these functions are called, they should be free of
-     side effects.  Any side effects should be done in the action
-     expression instead.
+     Therefore, since neither query expressions nor match actions are
+     guaranteed to be evaluated when the following functions are called,
+     they should be free of side effects.  Or, if a side effect is
+     required, the cache should be invalidated (e.g.  by incrementing
+     the buffer’s modified tick, or by using a query expression or match
+     action that has yet to be cached).  _Note: Future improvements will
+     allow the cache to be more easily disabled or cleared._
 
   2. Function: ‘org-ql-select’
 
@@ -728,13 +749,93 @@ File: README.info,  Node: Listing / acting-on results,  Prev: Agenda-like views,
             :where '(todo "WAITING"))
           ;; => ((headline (:raw-value "Visit the moon" ...) ...) ...)
 
-  4. Macro: ‘org-ql’
+  4. Macro: ‘org-ql’ (deprecated)
 
      _Arguments:_ ‘(buffers-or-files query &key sort narrow markers
      action)’
 
      Expands into a call to ‘org-ql-select’ with the same arguments.
      For convenience, arguments should be unquoted.
+
+     _Note: This macro is deprecated and will be removed in v0.7._
+
+
+File: README.info,  Node: Custom predicates,  Prev: Listing / acting-on results,  Up: Functions / Macros
+
+4.3.3 Custom predicates
+-----------------------
+
+   • See: Custom predicate tutorial (examples/defpred.org)
+
+  1. Macro: org-ql-defpred
+
+     _Arguments:_ ‘(name args docstring &key body preambles
+     normalizers)’
+
+     Define an ‘org-ql’ selector predicate named
+     ‘org-ql--predicate-NAME’.  ‘NAME’ may be a symbol or a list of
+     symbols: if a list, the first is used as ‘NAME’ and the rest are
+     aliases.  ‘A’ function is only created for ‘NAME’, not for aliases,
+     so a normalizer should be used to replace aliases with ‘NAME’ in
+     queries (keep reading).
+
+     ‘ARGS’ is a ‘cl-defun’-style argument list.  ‘DOCSTRING’ is the
+     function’s docstring.
+
+     ‘BODY’ is the body of the predicate.  It will be evaluated with
+     point on the beginning of an Org heading and should return non-nil
+     if the heading’s entry is a match.
+
+     ‘PREAMBLES’ and ‘NORMALIZERS’ are lists of ‘pcase’ forms matched
+     against Org ‘QL’ query sexps.  They are spliced into ‘pcase’ forms
+     in the definitions of the functions ‘org-ql--query-preamble’ and
+     ‘org-ql--normalize-query’, which see.  Those functions are
+     redefined when this macro is expanded, unless variable
+     ‘org-ql-defpred-defer’ is non-nil, in which case those functions
+     should be redefined manually after defining predicates by calling
+     ‘org-ql--define-query-preamble-fn’ and
+     ‘org-ql--define-normalize-query-fn’.
+
+     ‘NORMALIZERS’ are used to normalize query expressions to standard
+     forms.  For example, when the predicate has aliases, the aliases
+     should be replaced with predicate names using a normalizer.  Also,
+     predicate arguments may be put into a more optimal form so that the
+     predicate has less work to do at query time.
+
+     ‘PREAMBLES’ refer to regular expressions which may be used to
+     search through a buffer directly to a potential match rather than
+     testing the predicate body on each heading.  (Naming things is
+     hard.)  In each ‘pcase’ form in ‘PREAMBLES’, the ‘pcase’ expression
+     (not the pattern) should be a plist with the following keys, each
+     value of which should be an expression which may refer to variables
+     bound in the pattern:
+
+     ‘:regexp’ Regular expression which searches directly to a potential
+     match.
+
+     ‘:case-fold’ Bound to ‘case-fold-search’ around the regexp search.
+
+     ‘:query’ Expression which should replace the query expression, or
+     ‘query’ if it should not be changed (e.g.  if the regexp is
+     insufficient to determine whether a heading matches, in which case
+     the predicate’s body needs to be tested on the heading).  If the
+     regexp guarantees a match, this may be simply ‘t’, leaving the
+     query expression with no work to do, which improves performance.
+
+     For convenience, within the ‘pcase’ patterns, the symbol
+     ‘predicate-names’ is a special form which is replaced with a
+     pattern matching any of the predicate’s name and aliases.  For
+     example, if ‘NAME’ were:
+
+     ‘(heading h)’
+
+     Then if ‘NORMALIZERS’ were:
+
+     ‘((`(,predicate-names . ,args) `(heading ,@args)))’
+
+     It would be expanded to:
+
+     ‘((`(,(or 'heading 'h) . ,args) `(heading ,@args)))’
 
 
 File: README.info,  Node: Dynamic block,  Next: Links,  Prev: Functions / Macros,  Up: Usage
@@ -831,7 +932,8 @@ releases.
 
 * Menu:
 
-* 0.5-pre: 05-pre. 
+* 0.6-pre: 06-pre. 
+* 0.5: 05. 
 * 0.4.9: 049. 
 * 0.4.8: 048. 
 * 0.4.7: 047. 
@@ -852,10 +954,31 @@ releases.
 * 0.1: 01. 
 
 
-File: README.info,  Node: 05-pre,  Next: 049,  Up: Changelog
+File: README.info,  Node: 06-pre,  Next: 05,  Up: Changelog
 
-5.1 0.5-pre
+5.1 0.6-pre
 ===========
+
+*Added*
+   • Macro org-ql-defpred, used to define search predicates.  (See
+     tutorial (examples/defpred.org).)
+
+   *Changed*
+   • Helm support (including the command helm-org-ql) has been moved to
+     a separate package, helm-org-ql.
+
+   *Internal*
+   • Predicates are now defined more cleanly with a macro
+     (org-ql-defpred) that consolidates functionality related to each
+     predicate.  This will also allow users to more easily define custom
+     predicates.
+   • Version 1.0 of library ‘peg’ is now required.
+
+
+File: README.info,  Node: 05,  Next: 049,  Prev: 06-pre,  Up: Changelog
+
+5.2 0.5
+=======
 
 *Added*
    • View dispatcher using transient.el (like Magit), bound to v in
@@ -882,14 +1005,20 @@ File: README.info,  Node: 05-pre,  Next: 049,  Up: Changelog
      our cache, and it removes the need for a compatibility alias for
      Org versions before 9.3.
 
+   *Deprecated*
+   • Macro org-ql is marked obsolete.  It will be removed in v0.7.
+     Functions org-ql-select and org-ql-query should be used instead.
+     (The macro serves only to confuse with regard to quoting
+     arguments.)
+
    *Acknowledgments*
    • tpeacock19 (https://github.com/tpeacock19) for extensive help
      testing new features in this version.
 
 
-File: README.info,  Node: 049,  Next: 048,  Prev: 05-pre,  Up: Changelog
+File: README.info,  Node: 049,  Next: 048,  Prev: 05,  Up: Changelog
 
-5.2 0.4.9
+5.3 0.4.9
 =========
 
 *Fixed*
@@ -900,7 +1029,7 @@ File: README.info,  Node: 049,  Next: 048,  Prev: 05-pre,  Up: Changelog
 
 File: README.info,  Node: 048,  Next: 047,  Prev: 049,  Up: Changelog
 
-5.3 0.4.8
+5.4 0.4.8
 =========
 
 *Fixed*
@@ -912,7 +1041,7 @@ File: README.info,  Node: 048,  Next: 047,  Prev: 049,  Up: Changelog
 
 File: README.info,  Node: 047,  Next: 046,  Prev: 048,  Up: Changelog
 
-5.4 0.4.7
+5.5 0.4.7
 =========
 
 *Fixed*
@@ -925,7 +1054,7 @@ File: README.info,  Node: 047,  Next: 046,  Prev: 048,  Up: Changelog
 
 File: README.info,  Node: 046,  Next: 045,  Prev: 047,  Up: Changelog
 
-5.5 0.4.6
+5.6 0.4.6
 =========
 
 *Fixed*
@@ -938,7 +1067,7 @@ File: README.info,  Node: 046,  Next: 045,  Prev: 047,  Up: Changelog
 
 File: README.info,  Node: 045,  Next: 044,  Prev: 046,  Up: Changelog
 
-5.6 0.4.5
+5.7 0.4.5
 =========
 
 *Fixed*
@@ -950,7 +1079,7 @@ File: README.info,  Node: 045,  Next: 044,  Prev: 046,  Up: Changelog
 
 File: README.info,  Node: 044,  Next: 043,  Prev: 045,  Up: Changelog
 
-5.7 0.4.4
+5.8 0.4.4
 =========
 
 *Fixed*
@@ -962,7 +1091,7 @@ File: README.info,  Node: 044,  Next: 043,  Prev: 045,  Up: Changelog
 
 File: README.info,  Node: 043,  Next: 042,  Prev: 044,  Up: Changelog
 
-5.8 0.4.3
+5.9 0.4.3
 =========
 
 *Fixed*
@@ -972,8 +1101,8 @@ File: README.info,  Node: 043,  Next: 042,  Prev: 044,  Up: Changelog
 
 File: README.info,  Node: 042,  Next: 041,  Prev: 043,  Up: Changelog
 
-5.9 0.4.2
-=========
+5.10 0.4.2
+==========
 
 *Fixed*
    • Items’ to-do keywords were not shown in views.
@@ -981,7 +1110,7 @@ File: README.info,  Node: 042,  Next: 041,  Prev: 043,  Up: Changelog
 
 File: README.info,  Node: 041,  Next: 04,  Prev: 042,  Up: Changelog
 
-5.10 0.4.1
+5.11 0.4.1
 ==========
 
 *Fixed*
@@ -991,7 +1120,7 @@ File: README.info,  Node: 041,  Next: 04,  Prev: 042,  Up: Changelog
 
 File: README.info,  Node: 04,  Next: 032,  Prev: 041,  Up: Changelog
 
-5.11 0.4
+5.12 0.4
 ========
 
 _Note:_ The next release, 0.5, may include changes which will require
@@ -1072,7 +1201,7 @@ as they will be pushed to the master branch when ready.
 
 File: README.info,  Node: 032,  Next: 031,  Prev: 04,  Up: Changelog
 
-5.12 0.3.2
+5.13 0.3.2
 ==========
 
 *Fixed*
@@ -1085,7 +1214,7 @@ File: README.info,  Node: 032,  Next: 031,  Prev: 04,  Up: Changelog
 
 File: README.info,  Node: 031,  Next: 03,  Prev: 032,  Up: Changelog
 
-5.13 0.3.1
+5.14 0.3.1
 ==========
 
 *Fixed*
@@ -1095,7 +1224,7 @@ File: README.info,  Node: 031,  Next: 03,  Prev: 032,  Up: Changelog
 
 File: README.info,  Node: 03,  Next: 023,  Prev: 031,  Up: Changelog
 
-5.14 0.3
+5.15 0.3
 ========
 
 *Added*
@@ -1160,7 +1289,7 @@ File: README.info,  Node: 03,  Next: 023,  Prev: 031,  Up: Changelog
 
 File: README.info,  Node: 023,  Next: 022,  Prev: 03,  Up: Changelog
 
-5.15 0.2.3
+5.16 0.2.3
 ==========
 
 *Fixed*
@@ -1170,7 +1299,7 @@ File: README.info,  Node: 023,  Next: 022,  Prev: 03,  Up: Changelog
 
 File: README.info,  Node: 022,  Next: 021,  Prev: 023,  Up: Changelog
 
-5.16 0.2.2
+5.17 0.2.2
 ==========
 
 *Fixed*
@@ -1181,7 +1310,7 @@ File: README.info,  Node: 022,  Next: 021,  Prev: 023,  Up: Changelog
 
 File: README.info,  Node: 021,  Next: 02,  Prev: 022,  Up: Changelog
 
-5.17 0.2.1
+5.18 0.2.1
 ==========
 
 *Fixed*
@@ -1191,7 +1320,7 @@ File: README.info,  Node: 021,  Next: 02,  Prev: 022,  Up: Changelog
 
 File: README.info,  Node: 02,  Next: 01,  Prev: 021,  Up: Changelog
 
-5.18 0.2
+5.19 0.2
 ========
 
 *Added*
@@ -1274,7 +1403,7 @@ File: README.info,  Node: 02,  Next: 01,  Prev: 021,  Up: Changelog
 
 File: README.info,  Node: 01,  Prev: 02,  Up: Changelog
 
-5.19 0.1
+5.20 0.1
 ========
 
 First tagged release.
@@ -1332,53 +1461,56 @@ GPLv3
 
 Tag Table:
 Node: Top225
-Node: Contents1594
-Node: Screenshots1717
-Node: Installation1835
-Node: Quelpa2473
-Node: Usage2916
-Node: Commands3314
-Node: org-ql-search3787
-Node: helm-org-ql5437
-Node: org-ql-view5849
-Node: org-ql-view-sidebar6349
-Node: org-ql-view-recent-items6705
-Node: org-ql-sparse-tree7189
-Node: Queries7989
-Node: Non-sexp query syntax9100
-Node: General predicates10807
-Node: Ancestor/descendant predicates16220
-Node: Date/time predicates17348
-Node: Functions / Macros20003
-Node: Agenda-like views20258
-Node: Listing / acting-on results21663
-Node: Dynamic block26858
-Node: Links29556
-Node: Tips30243
-Node: Changelog30561
-Node: 05-pre31245
-Node: 04932484
-Node: 04832762
-Node: 04733109
-Node: 04633504
-Node: 04533904
-Node: 04434263
-Node: 04334620
-Node: 04234815
-Node: 04134974
-Node: 0435215
-Node: 03239148
-Node: 03139527
-Node: 0339724
-Node: 02342699
-Node: 02242927
-Node: 02143195
-Node: 0243394
-Node: 0147429
-Node: Notes47530
-Node: Comparison with Org Agenda searches47692
-Node: org-sidebar48564
-Node: License48843
+Node: Contents1667
+Node: Screenshots1790
+Node: Installation1908
+Node: Quelpa2404
+Node: Helm support2932
+Node: Usage3323
+Node: Commands3721
+Node: org-ql-search4194
+Node: helm-org-ql5844
+Node: org-ql-view6204
+Node: org-ql-view-sidebar6704
+Node: org-ql-view-recent-items7060
+Node: org-ql-sparse-tree7544
+Node: Queries8344
+Node: Non-sexp query syntax9455
+Node: General predicates11162
+Node: Ancestor/descendant predicates16575
+Node: Date/time predicates17703
+Node: Functions / Macros20358
+Node: Agenda-like views20656
+Node: Listing / acting-on results22061
+Node: Custom predicates27683
+Node: Dynamic block31174
+Node: Links33872
+Node: Tips34559
+Node: Changelog34877
+Node: 06-pre35573
+Node: 0536196
+Node: 04937673
+Node: 04837947
+Node: 04738294
+Node: 04638689
+Node: 04539089
+Node: 04439448
+Node: 04339805
+Node: 04240000
+Node: 04140161
+Node: 0440402
+Node: 03244335
+Node: 03144714
+Node: 0344911
+Node: 02347886
+Node: 02248114
+Node: 02148382
+Node: 0248581
+Node: 0152616
+Node: Notes52717
+Node: Comparison with Org Agenda searches52879
+Node: org-sidebar53751
+Node: License54030
 
 End Tag Table
 
