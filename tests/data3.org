@@ -7,12 +7,12 @@
 
 * Meat
 ** Poultry                                                                      :poultry:
-*** Chicken
+*** Chicken                                                                     :like:
 *** Duck
 ** Beef                                                                         :beef:
 ** Fish                                                                         :fish:
 *** Tuna
-*** Salmon
+*** Salmon                                                                      :like:
 * Fruit                                                                         :fruit:
 ** Blueberry
 ** Strawberry

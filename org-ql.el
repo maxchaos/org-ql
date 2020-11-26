@@ -1497,6 +1497,22 @@ Tests both inherited and local tags."
   :body (cl-macrolet ((tags-p (tags)
                               `(and ,tags
                                     (not (eq 'org-ql-nil ,tags)))))
+          (-let* (((inherited local) (org-ql--tags-at (point))))
+            (cl-typecase tags
+              (null (or (tags-p inherited)
+                        (tags-p local)))
+              (otherwise (or (when (tags-p inherited)
+                               (seq-intersection tags inherited))
+                             (when (tags-p local)
+                               (seq-intersection tags local))))))))
+
+(org-ql-defpred (group-tags) (&rest tags)
+  "Return non-nil if current heading has one or more of TAGS (a list of strings).
+Tests both inherited and local tags as well as group tags by expanding hierarchy."
+  ;; MAYBE: -all versions for inherited and local.
+  :body (cl-macrolet ((tags-p (tags)
+                              `(and ,tags
+                                    (not (eq 'org-ql-nil ,tags)))))
           (-let* (((inherited local inherited-groups local-groups) (org-ql--tags-at (point))))
             (cl-typecase tags
               (null (or (tags-p inherited)
@@ -1517,6 +1533,14 @@ Tests both inherited and local tags."
   :normalizers ((`(,predicate-names) `(tags))
                 (`(,predicate-names . ,tags) `(and ,@(--map `(tags ,it) tags))))
   :body (apply #'org-ql--predicate-tags tags))
+
+(org-ql-defpred (group-tags-all group-tags&) (&rest tags)
+  "Return non-nil if current heading has all of TAGS (a list of strings).
+Tests both inherited and local tags as well as group tags by expanding hierarchy."
+  ;; MAYBE: -all versions for inherited and local.
+  :normalizers ((`(,predicate-names) `(tags))
+                (`(,predicate-names . ,tags) `(and ,@(--map `(group-tags ,it) tags))))
+  :body (apply #'org-ql--predicate-group-tags tags))
 
 (org-ql-defpred (tags-inherited inherited-tags tags-i itags) (&rest tags)
   "Return non-nil if current heading's inherited tags include one or more of TAGS (a list of strings).
@@ -1560,6 +1584,27 @@ If TAGS is nil, return non-nil if heading has any local tags."
 Tests both inherited and local tags."
   :normalizers ((`(,predicate-names . ,regexps)
                  `(tags-regexp ,@regexps)))
+  :body (cl-macrolet ((tags-p (tags)
+                              `(and ,tags
+                                    (not (eq 'org-ql-nil ,tags)))))
+          (-let* (((inherited local) (org-ql--tags-at (point))))
+            (cl-typecase regexps
+              (null (or (tags-p inherited)
+                        (tags-p local)))
+              (otherwise (or (when (tags-p inherited)
+                               (cl-loop for tag in inherited
+                                        thereis (cl-loop for regexp in regexps
+                                                         thereis (string-match regexp tag))))
+                             (when (tags-p local)
+                               (cl-loop for tag in local
+                                        thereis (cl-loop for regexp in regexps
+                                                         thereis (string-match regexp tag))))))))))
+
+(org-ql-defpred (group-tags-regexp group-tags*) (&rest regexps)
+  "Return non-nil if current heading has tags matching one or more of REGEXPS.
+Tests both inherited and local tags as well as group tags by expanding hierarchy."
+  :normalizers ((`(,predicate-names . ,regexps)
+                 `(group-tags-regexp ,@regexps)))
   :body (cl-macrolet ((tags-p (tags)
                               `(and ,tags
                                     (not (eq 'org-ql-nil ,tags)))))

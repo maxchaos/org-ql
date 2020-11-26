@@ -910,10 +910,10 @@ RESULTS should be a list of strings as returned by
           '("Meat" "Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
           :buffer (org-ql-test-data-buffer "data3.org"))
         (org-ql-expect ('(tags "food"))
-          '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          nil
           :buffer (org-ql-test-data-buffer "data3.org"))
         (org-ql-expect ('(tags "meat"))
-          '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon")
+          nil
           :buffer (org-ql-test-data-buffer "data3.org"))
         (org-ql-expect ('(tags "fish"))
           '("Fish" "Tuna" "Salmon")
@@ -922,7 +922,7 @@ RESULTS should be a list of strings as returned by
           '("Beef")
           :buffer (org-ql-test-data-buffer "data3.org"))
         (org-ql-expect ('(tags "produce"))
-          '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+          nil
           :buffer (org-ql-test-data-buffer "data3.org"))
         (org-ql-expect ('(tags "vegetable"))
           '("Vegetable" "Broccoli" "Potato")
@@ -1084,6 +1084,60 @@ RESULTS should be a list of strings as returned by
         (org-ql-expect ('(tags* "frui"))
           '("Fruit" "Blueberry" "Strawberry")
           :buffer (org-ql-test-data-buffer "data2.org"))))
+
+    (describe "(group-tags)"
+
+      (org-ql-it "with tag hierarchy"
+         (org-ql-expect ('(group-tags "groceries"))
+           '("Meat" "Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "food"))
+           '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon" "Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "meat"))
+           '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "fish"))
+           '("Fish" "Tuna" "Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "beef"))
+           '("Beef")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "produce"))
+           '("Fruit" "Blueberry" "Strawberry" "Vegetable" "Broccoli" "Potato")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "vegetable"))
+           '("Vegetable" "Broccoli" "Potato")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags "fruit"))
+           '("Fruit" "Blueberry" "Strawberry")
+           :buffer (org-ql-test-data-buffer "data3.org"))))
+
+    (describe "(group-tags-all), (group-tags&)"
+
+      (org-ql-it "with tag hierarchy"
+         (org-ql-expect ('(group-tags-all "groceries" "like"))
+           '("Chicken" "Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags-all "poultry" "like"))
+           '("Chicken")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags-all "fish" "like"))
+           '("Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags-all "vegetables" "like"))
+           nil
+           :buffer (org-ql-test-data-buffer "data3.org"))))
+
+    (describe "(group-tags-regexp), (group-tags*)"
+
+      (org-ql-it "with tag hierarchy"
+         (org-ql-expect ('(group-tags-regexp ".*ke.*"))
+           '("Chicken" "Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))
+         (org-ql-expect ('(group-tags-regexp ".*ea.*"))
+           '("Poultry" "Chicken" "Duck" "Beef" "Fish" "Tuna" "Salmon")
+           :buffer (org-ql-test-data-buffer "data3.org"))))
 
     (describe "(ts)"
 
